@@ -1,0 +1,8 @@
+[package]
+name = "aoc-2018-rust"
+version = "0.1.0"
+authors = ["Eshan Singh <eshansingh@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+hashbrown = "0.6"

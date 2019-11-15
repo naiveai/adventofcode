@@ -1,0 +1,20 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+funcy = "*"
+better-exceptions = "*"
+more-itertools = "*"
+sortedcontainers = "*"
+manhole = "*"
+attrs = "*"
+pudb = "*"
+functoolz = "*"
+
+[dev-packages]
+ptpython = "*"
+q = "*"
+pudb = "*"
+pp-ez = "*"

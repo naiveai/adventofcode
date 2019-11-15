@@ -88,12 +88,12 @@ pub struct Location {
 
 impl Location {
     fn adjacent(&self) -> [Self; 4] {
-        return [
+        [
             Location { x: self.x, y: self.y - 1 },
             Location { x: self.x, y: self.y + 1 },
             Location { x: self.x - 1, y: self.y },
             Location { x: self.x + 1, y: self.y }
-        ];
+        ]
     }
 }
 
@@ -143,7 +143,7 @@ impl fmt::Display for CombatGrid {
                 write!(f, " [{:?}] ", unit)?;
             }
 
-            write!(f, "\n")?;
+            writeln!(f)?;
         }
 
         Ok(())
@@ -166,10 +166,10 @@ impl CombatGrid {
             let enemy_units = self.units
                 .iter()
                 .filter(|(_, u)| u.is_enemy(&unit))
-                .map(|(l, u)| (l.clone(), u.clone()))
+                .map(|(l, u)| (*l, u.clone()))
                 .collect::<HashMap<_, _>>();
 
-            if enemy_units.len() == 0 {
+            if enemy_units.is_empty() {
                 return false; // Combat has ended, one team has won.
             }
 
@@ -208,7 +208,7 @@ impl CombatGrid {
     }
 
     fn move_unit(&mut self, current_unit_location: &Location, new_location: &Location) -> Unit {
-        let new_location = new_location.clone();
+        let new_location = *new_location;
         let mut current_unit = self.units.remove(current_unit_location).unwrap();
 
         current_unit.location = new_location;

@@ -1,18 +1,19 @@
-use std::env;
-use std::fs;
-use std::fmt;
-use std::error::Error;
-use std::collections::BinaryHeap;
 use hashbrown::HashMap;
 use std::cmp::{Ordering, Reverse};
+use std::collections::BinaryHeap;
+use std::env;
+use std::error::Error;
+use std::fmt;
+use std::fs;
 use unit::*;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     let args = env::args().collect::<Vec<String>>();
 
-    let input_filename = match args.len() {
-        2 => &args[1],
-        _ => "input.txt"
+    let input_filename = if args.len() == 2 {
+        &args[1]
+    } else {
+        "input.txt"
     };
 
     let string_grid = fs::read_to_string(input_filename)?;
@@ -36,8 +37,10 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     print!("{}", combat_grid);
     println!("\n");
 
-    println!("Outcome: {}",
-        full_rounds  * combat_grid.units.values().map(|u| u.hp).sum::<usize>());
+    println!(
+        "Outcome: {}",
+        full_rounds * combat_grid.units.values().map(|u| u.hp).sum::<usize>()
+    );
 
     Ok(())
 }
@@ -55,44 +58,70 @@ pub fn parse_input(string_grid: &str) -> Result<CombatGrid, String> {
 
             let current_location = Location { x, y };
 
-            grid.insert(current_location, match character {
-                '#' => Environment::Wall,
-                '.' => Environment::Open,
-                'G' | 'E' => {
-                    units.insert(current_location, Unit {
-                        team: if character == 'G' { UnitTeam::Goblin } else { UnitTeam::Elf },
-                        location: current_location,
-                        hp: 200,
-                        attack_power: 3
-                    });
+            grid.insert(
+                current_location,
+                match character {
+                    '#' => Environment::Wall,
+                    '.' => Environment::Open,
+                    'G' | 'E' => {
+                        units.insert(
+                            current_location,
+                            Unit {
+                                team: if character == 'G' {
+                                    UnitTeam::Goblin
+                                } else {
+                                    UnitTeam::Elf
+                                },
+                                location: current_location,
+                                hp: 200,
+                                attack_power: 3,
+                            },
+                        );
 
-                    Environment::Open
+                        Environment::Open
+                    }
+                    _ => {
+                        return Err(format!("Invalid input character: {}", character));
+                    }
                 },
-                _ => {
-                    return Err(format!("Invalid input character: {}", character));
-                }
-            });
+            );
         }
     }
 
     dimensions.0 /= dimensions.1;
 
-    Ok(CombatGrid { grid, units, dimensions })
+    Ok(CombatGrid {
+        grid,
+        units,
+        dimensions,
+    })
 }
 
 #[derive(Eq, PartialEq, Copy, Clone, Hash)]
 pub struct Location {
     x: usize,
-    y: usize
+    y: usize,
 }
 
 impl Location {
     fn adjacent(&self) -> [Self; 4] {
         [
-            Location { x: self.x, y: self.y - 1 },
-            Location { x: self.x, y: self.y + 1 },
-            Location { x: self.x - 1, y: self.y },
-            Location { x: self.x + 1, y: self.y }
+            Location {
+                x: self.x,
+                y: self.y - 1,
+            },
+            Location {
+                x: self.x,
+                y: self.y + 1,
+            },
+            Location {
+                x: self.x - 1,
+                y: self.y,
+            },
+            Location {
+                x: self.x + 1,
+                y: self.y,
+            },
         ]
     }
 }
@@ -160,10 +189,11 @@ impl CombatGrid {
             // by the time we have gotten to it, so check if it's still there.
             let unit = match self.units.get(unit_location) {
                 Some(unit) => unit.clone(),
-                None => continue
+                None => continue,
             };
 
-            let enemy_units = self.units
+            let enemy_units = self
+                .units
                 .iter()
                 .filter(|(_, u)| u.is_enemy(&unit))
                 .map(|(l, u)| (*l, u.clone()))
@@ -199,8 +229,7 @@ impl CombatGrid {
         let mut attacked_unit = self.units.get_mut(attacked_unit_location).unwrap();
 
         // This protects against overflows in the usize
-        attacked_unit.hp =
-            attacked_unit.hp.saturating_sub(current_unit.attack_power);
+        attacked_unit.hp = attacked_unit.hp.saturating_sub(current_unit.attack_power);
 
         if attacked_unit.is_dead() {
             self.units.remove(attacked_unit_location);
@@ -222,19 +251,28 @@ impl CombatGrid {
             false
         } else if let Some(env) = self.grid.get(location) {
             env == &Environment::Open
-        } else { false }
+        } else {
+            false
+        }
     }
 }
 
 #[derive(Eq, PartialEq)]
 pub enum Environment {
     Wall,
-    Open
+    Open,
 }
 
 impl fmt::Debug for Environment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", if self == &Self::Wall { '#' } else { '.' })
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Wall => '#',
+                Self::Open => '.',
+            }
+        )
     }
 }
 
@@ -242,7 +280,10 @@ mod unit {
     use super::*;
 
     #[derive(Eq, PartialEq, Copy, Clone)]
-    pub enum UnitTeam { Goblin, Elf }
+    pub enum UnitTeam {
+        Goblin,
+        Elf,
+    }
 
     impl fmt::Debug for UnitTeam {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -255,7 +296,7 @@ mod unit {
         pub team: UnitTeam,
         pub location: Location,
         pub hp: usize,
-        pub attack_power: usize
+        pub attack_power: usize,
     }
 
     impl fmt::Debug for Unit {
@@ -279,12 +320,7 @@ mod unit {
                 .filter(|u| self.location.adjacent().contains(&u.location))
                 .collect::<Vec<_>>();
 
-            adjacent_enemy_units.sort_unstable_by(|a, b| {
-                match a.hp.cmp(&b.hp) {
-                    Ordering::Equal => a.location.cmp(&b.location),
-                    hp_cmp => hp_cmp
-                }
-            });
+            adjacent_enemy_units.sort_unstable_by_key(|unit| (unit.hp, unit.location));
 
             adjacent_enemy_units.reverse();
             adjacent_enemy_units.pop().map(|u| u.location)
@@ -293,24 +329,30 @@ mod unit {
         pub fn maybe_move(
             &self,
             enemy_units: &HashMap<Location, Unit>,
-            is_open_fn: impl Fn(&Location) -> bool
+            is_open_fn: impl Fn(&Location) -> bool,
         ) -> Option<Location> {
-            let mut frontier = self.location.adjacent()
+            let mut frontier = self
+                .location
+                .adjacent()
                 .iter()
                 .cloned()
-                .filter(|l| is_open_fn(l))
-                .map(|l| Reverse(SearchNode {
-                    distance: 1,
-                    current_location: l,
-                    starting_location: l,
-                }))
+                .filter(&is_open_fn)
+                .map(|l| {
+                    Reverse(SearchNode {
+                        distance: 1,
+                        current_location: l,
+                        starting_location: l,
+                    })
+                })
                 .collect::<BinaryHeap<_>>();
 
-            let mut explored: Vec<Location> = Vec::new();
+            let mut explored = Vec::new();
 
             while let Some(Reverse(next)) = frontier.pop() {
                 for next_adjacent in next.current_location.adjacent().iter().cloned() {
-                    if explored.contains(&next_adjacent) { continue; }
+                    if explored.contains(&next_adjacent) {
+                        continue;
+                    }
 
                     if !is_open_fn(&next_adjacent) {
                         if enemy_units.contains_key(&next_adjacent) {
@@ -323,7 +365,7 @@ mod unit {
                     frontier.push(Reverse(SearchNode {
                         distance: next.distance + 1,
                         current_location: next_adjacent,
-                        starting_location: next.starting_location
+                        starting_location: next.starting_location,
                     }));
 
                     explored.push(next_adjacent);
@@ -335,26 +377,10 @@ mod unit {
     }
 
     // Private helper to make maybe_move easier to keep track of
-    #[derive(Debug, Eq, PartialEq, Copy, Clone)]
+    #[derive(Debug, Eq, PartialEq, Copy, Clone, Ord, PartialOrd)]
     struct SearchNode {
         distance: usize,
         current_location: Location,
         starting_location: Location,
-    }
-
-    impl Ord for SearchNode {
-        fn cmp(&self, other: &Self) -> Ordering {
-            self.distance.cmp(&other.distance).then(
-                self.current_location.cmp(&other.current_location).then(
-                    self.starting_location.cmp(&other.starting_location)
-                )
-            )
-        }
-    }
-
-    impl PartialOrd for SearchNode {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            Some(self.cmp(&other))
-        }
     }
 }

@@ -1,5 +1,5 @@
-use std::{env, fs, fmt};
 use std::error::Error;
+use std::{env, fmt, fs};
 
 const GRID_SIZE: (usize, usize) = (300, 300);
 
@@ -8,13 +8,13 @@ type Grid = Vec<Vec<isize>>;
 pub fn main() -> Result<(), Box<dyn Error>> {
     let args = env::args().collect::<Vec<String>>();
 
-    let input_filename = match args.len() {
-        2 => &args[1],
-        _ => "input.txt"
+    let input_filename = if args.len() == 2 {
+        &args[1]
+    } else {
+        "input.txt"
     };
 
-    let grid_serial_number: usize =
-        fs::read_to_string(input_filename)?.trim().parse()?;
+    let grid_serial_number: usize = fs::read_to_string(input_filename)?.trim().parse()?;
 
     // Technically, I could compute the grid along with the SAT, and
     // it might be faster since it would be one pass, but for the sake
@@ -32,13 +32,12 @@ pub fn main() -> Result<(), Box<dyn Error>> {
                     continue;
                 }
 
-                let square_sum =
-                    summed_area_table[yi][xi] -
-                    summed_area_table[yi][xi - size] -
-                    summed_area_table[yi - size][xi] +
-                    summed_area_table[yi - size][xi - size];
+                let square_sum = summed_area_table[yi][xi]
+                    - summed_area_table[yi][xi - size]
+                    - summed_area_table[yi - size][xi]
+                    + summed_area_table[yi - size][xi - size];
 
-                grid_sums.push((square_sum, (xi - size)+2, (yi - size)+2, size));
+                grid_sums.push((square_sum, (xi - size) + 2, (yi - size) + 2, size));
             }
         }
     }
@@ -54,24 +53,19 @@ fn construct_grid(grid_serial_number: usize, grid_size: (usize, usize)) -> Grid 
         let mut power_level = rack_id * y + grid_serial_number;
         power_level *= rack_id;
 
-        (((power_level / 100) % 10) as isize - 5)
+        ((power_level / 100) % 10) as isize - 5
     };
 
     (1..=grid_size.1)
-    .map(|yi|
-        (1..=grid_size.0)
-        .map(|xi| power_level(xi, yi))
+        .map(|yi| (1..=grid_size.0).map(|xi| power_level(xi, yi)).collect())
         .collect()
-    )
-    .collect()
 }
 
 fn compute_summed_area_table(grid: &Grid) -> Result<Grid, NonRectError> {
     // Asumming the grid is actually rectangular, we can assign all
     // the Vecs with the same row-length capacity to help optimize
     // with memory a teeny bit.
-    let mut summed_area_table =
-        vec![Vec::with_capacity(grid[0].len()); grid.len()];
+    let mut summed_area_table = vec![Vec::with_capacity(grid[0].len()); grid.len()];
 
     for (yi, row) in grid.iter().enumerate() {
         for (xi, &value) in row.iter().enumerate() {
@@ -92,7 +86,8 @@ fn compute_summed_area_table(grid: &Grid) -> Result<Grid, NonRectError> {
                     // previous row. This means the grid were working with is
                     // actually non-rectangular, which means we should return an
                     // error here.
-                    summed_area_table.get(yi - 1)
+                    summed_area_table
+                        .get(yi - 1)
                         .and_then(|row| row.get(xi))
                         .ok_or(NonRectError { xi, yi })?
                 }
@@ -101,18 +96,17 @@ fn compute_summed_area_table(grid: &Grid) -> Result<Grid, NonRectError> {
             // I(x - 1, y)
             let west = match xi {
                 0 => &0,
-                _ => &summed_area_table[yi][xi - 1]
+                _ => &summed_area_table[yi][xi - 1],
             };
 
             // I(x - 1, y - 1)
             let northwest = match (xi, yi) {
                 (0, _) => &0,
                 (_, 0) => &0,
-                (_, _) => {
-                    summed_area_table.get(yi - 1)
-                        .and_then(|row| row.get(xi - 1))
-                        .unwrap_or(&0)
-                }
+                (_, _) => summed_area_table
+                    .get(yi - 1)
+                    .and_then(|row| row.get(xi - 1))
+                    .unwrap_or(&0),
             };
 
             let summed_values = value + north + west - northwest;
@@ -125,7 +119,10 @@ fn compute_summed_area_table(grid: &Grid) -> Result<Grid, NonRectError> {
 }
 
 #[derive(Debug, Clone)]
-struct NonRectError { xi: usize, yi: usize }
+struct NonRectError {
+    xi: usize,
+    yi: usize,
+}
 
 impl fmt::Display for NonRectError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

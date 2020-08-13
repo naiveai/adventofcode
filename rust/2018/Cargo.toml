@@ -5,4 +5,6 @@ authors = ["Eshan Singh <eshansingh@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-hashbrown = "0.6"
+itertools = "0.9"
+cached = "0.18"
+binary-heap-plus = "0.3"

@@ -1,6 +1,5 @@
-use hashbrown::HashMap;
 use std::cmp::{Ordering, Reverse};
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 use std::env;
 use std::error::Error;
 use std::fmt;

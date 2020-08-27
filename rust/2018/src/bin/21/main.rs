@@ -11,10 +11,15 @@ pub fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("2018-21")
         .arg(Arg::from_usage("[input] 'Problem input file'").default_value("input.txt"))
         .arg(Arg::from_usage("[p1] -1 --part1 'Solves Part 1'"))
-        .arg(Arg::from_usage("[p2] -2 --part2 'Solves Part 2'"))
+        .arg(Arg::from_usage("[p2] -2 --part2 'Solves Part 2'").requires("special_reg"))
         .arg(Arg::from_usage(
             "[debug] -d --problem-debug 'Whether to execute the input program line by line'",
         ))
+        .arg(
+            Arg::from_usage(
+                "[special_reg] -s --special-reg 'Which register in the input is the special one that is checked for equality in Part 2 problems'"
+            ).default_value("5")
+        )
         .arg(
             Arg::from_usage("[reg0] -0 --reg-0 'Overrides the value of register 0'")
                 .takes_value(true)
@@ -31,10 +36,11 @@ pub fn main() -> Result<(), anyhow::Error> {
     let p1 = matches.is_present("p1");
     let p2 = matches.is_present("p2");
     let reg0 = matches.value_of("reg0").unwrap_or("0").parse()?;
+    let special_reg = matches.value_of("special_reg").unwrap().parse::<usize>()?;
 
     let mut regs = vec![reg0, 0, 0, 0, 0, 0];
 
-    let mut prev_reg5s = vec![];
+    let mut prev_special_regs = vec![];
 
     loop {
         let ins = match code.get(regs[ins_pointer]) {
@@ -54,20 +60,20 @@ pub fn main() -> Result<(), anyhow::Error> {
         }
 
         if ins.name == "eqrr" {
-            if p1 && prev_reg5s.len() == 0 {
-                println!("Part 1: {:?}", regs[5]);
+            if p1 && prev_special_regs.len() == 0 {
+                println!("Part 1: {:?}", regs[special_reg]);
                 if !p2 {
                     break;
                 }
             }
 
-            if p2 && prev_reg5s.contains(&regs[5]) {
-                println!("Part 2: {:?}", prev_reg5s.last().unwrap());
+            if p2 && prev_special_regs.contains(&regs[special_reg]) {
+                println!("Part 2: {:?}", prev_special_regs.last().unwrap());
                 break;
             }
 
             if p1 || p2 {
-                prev_reg5s.push(regs[5]);
+                prev_special_regs.push(regs[special_reg]);
             }
         }
 

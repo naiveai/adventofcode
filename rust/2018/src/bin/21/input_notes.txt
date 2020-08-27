@@ -1,0 +1,40 @@
+Raw program as is after the "check" part:
+
+#5 = 0 (line 5)
+#4 = 0(#5) | 65536 = 65536
+#5 = 3935295
+#2 = 65536(#4) & 255 = 0
+#5 = 3935295(#5) + 0(#2) = 3935295
+#5 = 3935295(#5) & 16777215 = 393529
+#5 = 3935295(#5) * 65899 = 259332005205
+#5 = 259332005205(#5) & 16777215 = 6577493
+#2 = 256 > 65536(#4) = false = 0
+#1(ip) = 0(#2) + 14(#1(ip)) = 14
+#1(ip) = 15(#1(ip)) + 1 = 16 = JUMP to 17
+#2 = 0
+#3 = 0(#2) + 1 = 1
+#3 = 1(#3) * 256 = 256
+#3 = 256(#3) > 65536(#4) = false = 0
+#1(ip) = 0(#3) + 21(#1(ip)) = 21
+#1(ip) = 22(#1(ip)) + 1 = 23 = JUMP to 24
+#2 = 0(#2) + 1 = 1
+#1(ip) = 17 = JUMP to 18
+keeps incrementing #2, then doing (#2 + 1) * 3 and seeing
+if it's greater than 65536(#4) constantly. Takes forever
+eventually #2 reaches 256, which pushes it over the edge.
+#3 finally becomes 1, after the gtrr 3 4 3 on 20
+regs are: [0, 20, 256, 1, 65536, 6577493]
+#1(ip) = 1(#3) + 21(#1) = 22 = JUMP to 23
+#1(ip) = 25 = JUMP to 26
+#4 = 256(#2)
+#1 = 7 = JUMP to 8
+#2 = 256(#4) & 255 = 0
+#5 = 6577493(#5) + 0(#2) = 6577493
+possible vuln here? 16777215 spits out the same number
+when bitwise and'ed for all numbers (as far as I can tell)
+below 8 digits.
+#5 = 6577493(#5) & 16777215 = 6577493
+#5 = 6577493(#5) * 65899 = 433450211207
+#5 = 433450211207 & 16777215 = 10835847
+#2 = 256 > 256(#4) = false = 0
+#1(ip) = 0(#2) + 14(#1(ip)) = 14

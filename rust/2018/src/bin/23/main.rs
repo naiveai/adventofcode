@@ -1,11 +1,13 @@
 use anyhow::{anyhow, Context};
 use clap::{App, Arg};
 use itertools::Itertools;
-use std::fmt;
-use std::fs;
-use std::num::ParseIntError;
-use std::str::FromStr;
 use z3::ast::{self, Ast};
+use std::{
+    fmt,
+    fs,
+    num::ParseIntError,
+    str::FromStr
+};
 
 pub fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("2018-23")
@@ -82,7 +84,8 @@ fn find_best_point_z3(bots: Vec<Bot>) -> Option<Location> {
     // Maximize the number of bots in range
     opt.maximize(&z3::ast::Int::add(
         &ctx,
-        &in_range_flags.iter().collect_vec(),
+        // Convert Vec<T> to Vec<&T>
+        &in_range_flags.iter().collect_vec()
     ));
 
     // Minimize the manhattan distance from the origin

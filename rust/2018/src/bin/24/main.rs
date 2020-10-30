@@ -28,7 +28,7 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     let input_filename = matches.value_of("input").unwrap();
 
-    let battle_info_str = fs::read_to_string(input_filename)?;
+    let battle_info_str = fs::read_to_string(input_filename)?.replace("\r\n", "\n");
     let groups = parse_input(&battle_info_str)?;
 
     if matches.is_present("p1") {

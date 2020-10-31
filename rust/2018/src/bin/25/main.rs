@@ -1,4 +1,5 @@
-#![feature(const_generics, specialization, type_alias_impl_trait)]
+#![allow(incomplete_features)]
+#![feature(const_generics, specialization, refcell_take, type_alias_impl_trait)]
 
 mod disjoint_set;
 
@@ -8,7 +9,7 @@ use derive_more::{From, Index};
 use disjoint_set::DisjointSet;
 use itertools::Itertools;
 use num::{
-    traits::{AsPrimitive, NumAssignOps, NumOps},
+    traits::{AsPrimitive, NumAssignOps},
     Num, Unsigned,
 };
 use std::{convert::TryInto, fmt, fs, slice, str::FromStr};
@@ -37,14 +38,20 @@ fn find_chains<N, C, const D: usize>(
     chain_distance: C,
 ) -> DisjointSet<Point<N, D>>
 where
-    N: Num + fmt::Debug + Eq + PartialOrd + Copy + NumOps + AsPrimitive<C>,
+    N: Num + Eq + PartialOrd + AsPrimitive<C>,
     C: 'static + Unsigned + Copy + NumAssignOps + PartialOrd,
 {
     let mut points_ds = DisjointSet::with_capacity(points.len());
     let mut points_ds_idxs = Vec::with_capacity(points.len());
 
-    for point in points {
-        let point_ds_idx = points_ds.make_set(point.clone()).expect("");
+    for point in points.iter().copied() {
+        let point_ds_idx = points_ds
+            .make_set(point)
+            // We have to map_err to satisfy the compiler because
+            // unwrap requires that the error type (Point<N>) is Debug,
+            // which is not necessarily the case here becuase N: !Debug.
+            .map_err(|_| ())
+            .unwrap();
 
         for (other_point_idx, &other_point_ds_idx) in points_ds_idxs.iter().enumerate() {
             if point.manhattan_distance(&points[other_point_idx]) <= chain_distance {
@@ -118,7 +125,7 @@ impl<N: Num, const D: usize> Point<N, D> {
 // with generics anyway.
 impl<N, const D: usize> Point<N, D>
 where
-    N: Num + PartialOrd + Copy + NumOps,
+    N: Num + PartialOrd,
 {
     fn manhattan_distance<R>(&self, other: &Point<N, D>) -> R
     where

@@ -2,8 +2,10 @@ use std::{
     cell::RefCell,
     collections::HashSet,
     convert::TryFrom,
+    fmt,
     iter::{self, ExactSizeIterator},
     mem,
+    ops::{Index, IndexMut},
 };
 
 /// Represents a disjoint set of various subsets,
@@ -29,14 +31,11 @@ use std::{
 // at the Wikipedia page for "Disjoint-set data structure".
 #[derive(Clone)]
 pub struct DisjointSet<T: Eq> {
-    /// Contains the root indexes for each set.
-    /// Can be used as a "representative" value
-    /// for methods on `DisjointSet`.
     roots: HashSet<usize>,
     nodes: Vec<RefCell<Node<T>>>,
 }
 
-#[derive(Clone)]
+#[derive(Default, Clone)]
 struct Node<T> {
     elem: T,
     parent_idx: usize,
@@ -61,6 +60,26 @@ impl<T: Eq> DisjointSet<T> {
             nodes: Vec::with_capacity(capacity),
             roots: HashSet::new(),
         }
+    }
+
+    /// Returns the number of subsets.
+    pub fn num_sets(&self) -> usize {
+        self.roots.len()
+    }
+
+    /// Returns the number of total elements in all subsets.
+    pub fn num_elements(&self) -> usize {
+        self.nodes.len()
+    }
+
+    /// Returns true if the given element is present in the `DisjointSet`.
+    pub fn contains(&self, elem: &T) -> bool {
+        self.position(elem).is_some()
+    }
+
+    /// Returns the index of the given element if it exists, or None otherwise.
+    pub fn position(&self, elem: &T) -> Option<usize> {
+        self.nodes.iter().position(|e| &e.borrow().elem == elem)
     }
 
     /// Adds a new set with a single, given element to
@@ -88,82 +107,100 @@ impl<T: Eq> DisjointSet<T> {
         }
     }
 
-    /// Returns true if the given element is present in the `DisjointSet`.
-    pub fn contains(&self, elem: &T) -> bool {
-        self.position(elem).is_some()
-    }
-
-    /// Returns the index of the given element if it exists, or None otherwise.
-    pub fn position(&self, elem: &T) -> Option<usize> {
-        self.nodes.iter().position(|e| &e.borrow().elem == elem)
-    }
-
     /// If present, returns an immutable reference to the element at `elem_idx`.
-    ///
-    /// This requires &mut self because that ensures you have a lock and
-    /// can't use other methods that may use interior mutability.
-    pub fn get(&mut self, elem_idx: usize) -> Option<&T> {
-        self.get_mut(elem_idx).map(|e| &*e)
+    pub fn get(&self, elem_idx: usize) -> Option<&T> {
+        // Nothing in our code actually mutates node.elem: T using &self.
+        // Even find_root_idx uses interior mutability only
+        // to modify node.parent. And the caller can't
+        // call get_mut or iter_mut_set while the &T here is
+        // still in scope. So it all works out!
+        Some(unsafe { &*self.get_raw(elem_idx)? })
     }
 
     /// If present, returns a mutable reference to the element at `elem_idx`.
     pub fn get_mut(&mut self, elem_idx: usize) -> Option<&mut T> {
-        let node_cell = self.nodes.get_mut(elem_idx)?;
-
         // RefCall::get_mut is used rarely, but here it's appropriate:
         // As long as the &mut T from this is still in scope,
         // the caller won't be able to use any other methods,
         // so interior mutability isn't a concern.
-        Some(&mut node_cell.get_mut().elem)
+        Some(&mut self.nodes.get_mut(elem_idx)?.get_mut().elem)
     }
 
-    /// Returns the number of subsets.
-    pub fn num_sets(&self) -> usize {
-        self.roots.len()
-    }
-
-    /// Returns the number of total elements in all subsets.
-    pub fn num_elements(&self) -> usize {
-        self.nodes.len()
+    /// If present, returns a raw pointer to the element at `elem_idx`.
+    fn get_raw(&self, elem_idx: usize) -> Option<*mut T> {
+        unsafe { Some(&mut (*self.nodes.get(elem_idx)?.as_ptr()).elem as *mut _) }
     }
 
     /// Returns an `&T` iterator over all elements in the set
     /// elem_idx belongs to, if it exists.
-    ///
-    /// This requires `&mut self` because that ensures you have a lock
-    /// and can't use other methods that may use interior mutability.
+    // We use both applicable Iterator types here to give the caller
+    // the maximum possible flexbility when using the returned value.
     pub fn iter_set(
-        &mut self,
+        &self,
         elem_idx: usize,
-    ) -> Option<impl ExactSizeIterator<Item = &T> + DoubleEndedIterator<Item = &T>> {
-        self.iter_mut_set(elem_idx).map(|v| v.map(|e| &*e))
+    ) -> Option<impl ExactSizeIterator<Item = &T> + DoubleEndedIterator> {
+        Some(
+            self.get_set_idxs(elem_idx)?
+                .into_iter()
+                .map(move |i| self.get(i).unwrap()),
+        )
     }
 
     /// Returns an `&mut T` iterator over all elements in the set
     /// elem_idx belongs to, if it exists.
-    // We use both applicable Iterator types here to give the caller
-    // the maximum possible flexbility when using the returned value.
     pub fn iter_mut_set(
         &mut self,
         elem_idx: usize,
-    ) -> Option<impl ExactSizeIterator<Item = &mut T> + DoubleEndedIterator<Item = &mut T>> {
+    ) -> Option<impl ExactSizeIterator<Item = &mut T> + DoubleEndedIterator> {
         let set_idxs = self.get_set_idxs(elem_idx)?;
 
-        Some(
-            set_idxs
-                .iter()
-                .map(|&i| {
-                    // In reality this is safe because there'll
-                    // be no duplicate indexes. But Rust doesn't
-                    // have any way of knowing that.
-                    unsafe { &mut *(self.get_mut(i).unwrap() as *mut _) }
-                })
-                // We have to collect in between to ensure
-                // the closure that borrows self doesn't need
-                // to leave the function.
-                .collect::<Vec<_>>()
-                .into_iter(),
-        )
+        Some(set_idxs.into_iter().map(move |i| {
+            // In reality this is safe because there'll
+            // be no duplicate indexes. But Rust doesn't
+            // have any way of knowing that.
+            unsafe { &mut *(self.get_mut(i).unwrap() as *mut _) }
+        }))
+    }
+
+    /// Returns an second-order iterator of `&T` of all the subsets.
+    pub fn iter_all_sets(
+        &self,
+    ) -> impl ExactSizeIterator<Item = impl ExactSizeIterator<Item = &T> + DoubleEndedIterator>
+           + DoubleEndedIterator {
+        // Put roots into a Vec to satisfy DoubleEndedIterator
+        let roots = self.roots.iter().collect::<Vec<_>>();
+
+        roots.into_iter().map(move |&r| self.iter_set(r).unwrap())
+    }
+
+    /// Returns a second-order iterator of `&mut T` of all the subsets.
+    pub fn iter_mut_all_sets(
+        &mut self,
+    ) -> impl ExactSizeIterator<Item = impl ExactSizeIterator<Item = &mut T> + DoubleEndedIterator>
+           + DoubleEndedIterator {
+        // This function can't be as simple as iter_all_sets,
+        // because Rust won't like it if we just straight up take
+        // &mut self several times over.
+        self.roots
+            .iter()
+            .map(|&root| {
+                self.get_set_idxs(root)
+                    .unwrap()
+                    .into_iter()
+                    .map(|i| {
+                        // No duplicate indexes means that using this
+                        // pointer as a &mut T is safe. We can't
+                        // use get_mut here because that takes &mut self.
+                        unsafe { &mut *self.get_raw(i).unwrap() }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            // In order to avoid the closures that borrow
+            // self outliving the function itself, we collect
+            // their results and then turn them back into iterators.
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|v| v.into_iter())
     }
 
     /// Returns Some(true) if the elements at both the given indexes
@@ -317,6 +354,41 @@ impl<T: Eq> DisjointSet<T> {
     }
 }
 
+impl<T: Eq + fmt::Debug> fmt::Debug for DisjointSet<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{:?}",
+            self.iter_all_sets()
+                .map(|i| i.collect::<Vec<_>>())
+                .collect::<Vec<_>>()
+        )
+    }
+}
+
+impl<T: Eq> Index<usize> for DisjointSet<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        self.get(index).expect(&format!(
+            "index out of bounds: the len is {} but the index is {}",
+            self.num_elements(),
+            index
+        ))
+    }
+}
+
+impl<T: Eq> IndexMut<usize> for DisjointSet<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        let len = self.num_elements();
+
+        self.get_mut(index).expect(&format!(
+            "index out of bounds: the len is {} but the index is {}",
+            len, index
+        ))
+    }
+}
+
 impl<T: Eq> TryFrom<Vec<T>> for DisjointSet<T> {
     type Error = TryFromVecError;
 
@@ -399,7 +471,7 @@ impl<T: Eq> From<DisjointSet<T>> for Vec<Vec<T>> {
 // a more efficient way to accomplish this conversion
 // if T: Default.
 impl<T: Eq + Default> From<DisjointSet<T>> for Vec<Vec<T>> {
-    fn from(mut ds: DisjointSet<T>) -> Self {
+    fn from(ds: DisjointSet<T>) -> Self {
         let mut all_sets_idxs = vec![];
 
         for &root in ds.roots.iter() {
@@ -408,13 +480,13 @@ impl<T: Eq + Default> From<DisjointSet<T>> for Vec<Vec<T>> {
 
         all_sets_idxs
             .into_iter()
-            .map(|set_idx_vec| {
-                set_idx_vec
+            .map(|set_idxs| {
+                set_idxs
                     .into_iter()
                     .map(|i| {
-                        // Replace each element with its default to keep everything
+                        // Replace each node with its default to keep everything
                         // valid while we're iterating. ds is gonna get dropped anyway.
-                        mem::take(ds.get_mut(i).unwrap())
+                        ds.nodes[i].take().elem
                     })
                     .collect()
             })
@@ -424,7 +496,8 @@ impl<T: Eq + Default> From<DisjointSet<T>> for Vec<Vec<T>> {
 
 impl<T: Eq> IntoIterator for DisjointSet<T> {
     type Item = impl ExactSizeIterator<Item = T> + DoubleEndedIterator<Item = T>;
-    type IntoIter = impl ExactSizeIterator<Item = Self::Item> + DoubleEndedIterator<Item = Self::Item>;
+    type IntoIter =
+        impl ExactSizeIterator<Item = Self::Item> + DoubleEndedIterator<Item = Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
         <Vec<Vec<T>>>::from(self).into_iter().map(|v| v.into_iter())

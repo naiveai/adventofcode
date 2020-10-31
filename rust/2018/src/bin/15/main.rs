@@ -1,9 +1,10 @@
-use std::cmp::{Ordering, Reverse};
-use std::collections::{BinaryHeap, HashMap};
-use std::env;
-use std::error::Error;
-use std::fmt;
-use std::fs;
+use std::{
+    cmp::{Ordering, Reverse},
+    collections::{BinaryHeap, HashMap},
+    env,
+    error::Error,
+    fmt, fs,
+};
 use unit::*;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
@@ -127,7 +128,7 @@ impl Location {
 
 impl fmt::Debug for Location {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {})", self.x, self.y)
+        f.debug_tuple("").field(&self.x).field(&self.y).finish()
     }
 }
 

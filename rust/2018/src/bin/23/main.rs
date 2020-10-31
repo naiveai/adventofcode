@@ -2,7 +2,6 @@ use anyhow::{anyhow, Context};
 use clap::{App, Arg};
 use itertools::Itertools;
 use std::{fmt, fs, num::ParseIntError, str::FromStr};
-use z3::ast::{self, Ast};
 
 pub fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("2018-23")
@@ -32,64 +31,65 @@ pub fn main() -> Result<(), anyhow::Error> {
 // third-party dependency to just magically solve it. But I had no idea how to
 // solve it and this is really slow anyway.
 fn find_best_point_z3(bots: Vec<Bot>) -> Option<Location> {
-    let cfg = z3::Config::new();
-    let ctx = z3::Context::new(&cfg);
-    let opt = z3::Optimize::new(&ctx);
+    use z3::{ast::*, *};
+
+    let cfg = Config::new();
+    let ctx = Context::new(&cfg);
+    let opt = Optimize::new(&ctx);
 
     let (x, y, z) = (
-        ast::Int::new_const(&ctx, "x"),
-        ast::Int::new_const(&ctx, "y"),
-        ast::Int::new_const(&ctx, "z"),
+        Int::new_const(&ctx, "x"),
+        Int::new_const(&ctx, "y"),
+        Int::new_const(&ctx, "z"),
     );
 
-    fn zabs<'a>(ctx: &'a z3::Context, v: &'a z3::ast::Int) -> z3::ast::Int<'a> {
-        v.ge(&z3::ast::Int::from_i64(ctx, 0))
-            .ite(v, &v.unary_minus())
+    fn zabs<'a>(ctx: &'a Context, v: &'a Int) -> Int<'a> {
+        v.ge(&Int::from_i64(ctx, 0)).ite(v, &v.unary_minus())
     }
 
     let in_range_flags = (0..bots.len())
-        .map(|i| z3::ast::Int::new_const(&ctx, format!("in_range_{}", i)))
+        .map(|i| Int::new_const(&ctx, format!("in_range_{}", i)))
         .collect_vec();
 
     for (i, bot) in bots.iter().enumerate() {
         let (bot_x, bot_y, bot_z, bot_radius) = (
-            ast::Int::from_i64(&ctx, bot.location.x as i64),
-            ast::Int::from_i64(&ctx, bot.location.y as i64),
-            ast::Int::from_i64(&ctx, bot.location.z as i64),
-            ast::Int::from_u64(&ctx, bot.signal_radius as u64),
+            Int::from_i64(&ctx, bot.location.x as i64),
+            Int::from_i64(&ctx, bot.location.y as i64),
+            Int::from_i64(&ctx, bot.location.z as i64),
+            Int::from_u64(&ctx, bot.signal_radius as u64),
         );
 
         // If (x, y, z) is in range of the current bot, it'll be 1, otherwise 0
         opt.assert(
             &in_range_flags[i]._eq(
-                &ast::Int::add(
+                &Int::add(
                     &ctx,
                     &[
-                        &zabs(&ctx, &ast::Int::sub(&ctx, &[&x, &bot_x])),
-                        &zabs(&ctx, &ast::Int::sub(&ctx, &[&y, &bot_y])),
-                        &zabs(&ctx, &ast::Int::sub(&ctx, &[&z, &bot_z])),
+                        &zabs(&ctx, &Int::sub(&ctx, &[&x, &bot_x])),
+                        &zabs(&ctx, &Int::sub(&ctx, &[&y, &bot_y])),
+                        &zabs(&ctx, &Int::sub(&ctx, &[&z, &bot_z])),
                     ],
                 )
                 .le(&bot_radius)
-                .ite(&ast::Int::from_u64(&ctx, 1), &ast::Int::from_u64(&ctx, 0)),
+                .ite(&Int::from_u64(&ctx, 1), &ast::Int::from_u64(&ctx, 0)),
             ),
         );
     }
 
     // Maximize the number of bots in range
-    opt.maximize(&z3::ast::Int::add(
+    opt.maximize(&Int::add(
         &ctx,
         // Convert Vec<T> to Vec<&T>
         &in_range_flags.iter().collect_vec(),
     ));
 
     // Minimize the manhattan distance from the origin
-    opt.minimize(&z3::ast::Int::add(
+    opt.minimize(&Int::add(
         &ctx,
         &[&zabs(&ctx, &x), &zabs(&ctx, &y), &zabs(&ctx, &z)],
     ));
 
-    if opt.check(&[]) != z3::SatResult::Sat {
+    if opt.check(&[]) != SatResult::Sat {
         return None;
     }
 
@@ -151,33 +151,23 @@ impl FromStr for Location {
     type Err = ParseLocationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (x_str, y_str, z_str) = s
-            .split(',')
-            .collect_tuple()
-            .ok_or(Self::Err::CommaFormatError)?;
+        use ParseLocationError::*;
+
+        let (x_str, y_str, z_str) = s.split(',').collect_tuple().ok_or(CommaFormatError)?;
 
         Ok(Self {
-            x: x_str
-                .trim()
-                .parse()
-                .map_err(|e| Self::Err::ParseCoordinateError {
-                    coord: 'x',
-                    source: e,
-                })?,
-            y: y_str
-                .trim()
-                .parse()
-                .map_err(|e| Self::Err::ParseCoordinateError {
-                    coord: 'y',
-                    source: e,
-                })?,
-            z: z_str
-                .trim()
-                .parse()
-                .map_err(|e| Self::Err::ParseCoordinateError {
-                    coord: 'z',
-                    source: e,
-                })?,
+            x: x_str.trim().parse().map_err(|e| ParseCoordinateError {
+                coord: 'x',
+                source: e,
+            })?,
+            y: y_str.trim().parse().map_err(|e| ParseCoordinateError {
+                coord: 'y',
+                source: e,
+            })?,
+            z: z_str.trim().parse().map_err(|e| ParseCoordinateError {
+                coord: 'z',
+                source: e,
+            })?,
         })
     }
 }
@@ -192,6 +182,10 @@ pub enum ParseLocationError {
 
 impl fmt::Debug for Location {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {}, {})", self.x, self.y, self.z)
+        f.debug_tuple("")
+            .field(&self.x)
+            .field(&self.y)
+            .field(&self.z)
+            .finish()
     }
 }

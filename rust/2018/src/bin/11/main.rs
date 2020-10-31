@@ -1,5 +1,4 @@
-use std::error::Error;
-use std::{env, fmt, fs};
+use std::{env, error::Error, fmt, fs};
 
 const GRID_SIZE: (usize, usize) = (300, 300);
 

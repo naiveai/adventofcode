@@ -12,7 +12,7 @@ use num::{
     traits::{AsPrimitive, NumAssignOps},
     Num, Unsigned,
 };
-use std::{convert::TryInto, fmt, fs, slice, str::FromStr};
+use std::{convert::TryInto, fmt, fs, iter, slice, str::FromStr};
 
 pub fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("2018-25")
@@ -92,12 +92,14 @@ struct Point<N: Num, const D: usize>([N; D]);
 
 impl<N: Num + Default, const D: usize> Default for Point<N, D> {
     fn default() -> Self {
-        let v = std::iter::repeat_with(N::default).take(D).collect_vec();
-
-        Self(match v.try_into() {
-            Ok(a) => a,
-            Err(_) => unsafe { std::hint::unreachable_unchecked() },
-        })
+        Self(
+            iter::repeat_with(N::default)
+                .take(D)
+                .collect_vec()
+                .try_into()
+                .map_err(|_| ())
+                .unwrap(),
+        )
     }
 }
 

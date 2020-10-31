@@ -93,7 +93,7 @@ fn find_best_point_z3(bots: Vec<Bot>) -> Option<Location> {
         return None;
     }
 
-    let model = opt.get_model();
+    let model = opt.get_model()?;
 
     let (res_x, res_y, res_z) = (
         model.eval(&x).unwrap().as_i64().unwrap() as isize,

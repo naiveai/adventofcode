@@ -429,11 +429,11 @@ pub enum TryFromVecError {
 
 impl<T: Eq> From<DisjointSet<T>> for Vec<Vec<T>> {
     default fn from(ds: DisjointSet<T>) -> Self {
-        let mut all_sets_idxs = vec![];
-
-        for &root in ds.roots.iter() {
-            all_sets_idxs.push(ds.get_set_idxs(root).unwrap());
-        }
+        let all_sets_idxs = ds
+            .roots
+            .iter()
+            .map(|&root| ds.get_set_idxs(root).unwrap())
+            .collect::<Vec<_>>();
 
         let mut vec_2d: Vec<Vec<T>> = iter::repeat_with(Vec::new)
             .take(all_sets_idxs.len())
@@ -454,14 +454,9 @@ impl<T: Eq> From<DisjointSet<T>> for Vec<Vec<T>> {
 // if T: Default.
 impl<T: Eq + Default> From<DisjointSet<T>> for Vec<Vec<T>> {
     fn from(ds: DisjointSet<T>) -> Self {
-        let mut all_sets_idxs = vec![];
-
-        for &root in ds.roots.iter() {
-            all_sets_idxs.push(ds.get_set_idxs(root).unwrap());
-        }
-
-        all_sets_idxs
-            .into_iter()
+        ds.roots
+            .iter()
+            .map(|&root| ds.get_set_idxs(root).unwrap())
             .map(|set_idxs| {
                 set_idxs
                     .into_iter()

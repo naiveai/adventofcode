@@ -356,13 +356,7 @@ impl<T: Eq> DisjointSet<T> {
 
 impl<T: Eq + fmt::Debug> fmt::Debug for DisjointSet<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{:?}",
-            self.iter_all_sets()
-                .map(|i| i.collect::<Vec<_>>())
-                .collect::<Vec<_>>()
-        )
+        write!(f, "{:?}", <Vec<Vec<_>>>::from(self))
     }
 }
 
@@ -494,10 +488,21 @@ impl<T: Eq + Default> From<DisjointSet<T>> for Vec<Vec<T>> {
     }
 }
 
+impl<'a, T: Eq> From<&'a DisjointSet<T>> for Vec<Vec<&'a T>> {
+    fn from(ds: &'a DisjointSet<T>) -> Self {
+        ds.iter_all_sets().map(|i| i.collect()).collect()
+    }
+}
+
+impl<'a, T: Eq> From<&'a mut DisjointSet<T>> for Vec<Vec<&'a mut T>> {
+    fn from(ds: &'a mut DisjointSet<T>) -> Self {
+        ds.iter_mut_all_sets().map(|i| i.collect()).collect()
+    }
+}
+
 impl<T: Eq> IntoIterator for DisjointSet<T> {
-    type Item = impl ExactSizeIterator<Item = T> + DoubleEndedIterator<Item = T>;
-    type IntoIter =
-        impl ExactSizeIterator<Item = Self::Item> + DoubleEndedIterator<Item = Self::Item>;
+    type Item = impl ExactSizeIterator<Item = T> + DoubleEndedIterator;
+    type IntoIter = impl ExactSizeIterator<Item = Self::Item> + DoubleEndedIterator;
 
     fn into_iter(self) -> Self::IntoIter {
         <Vec<Vec<T>>>::from(self).into_iter().map(|v| v.into_iter())

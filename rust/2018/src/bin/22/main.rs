@@ -1,14 +1,18 @@
+#![feature(default_free_fn)]
+
 use binary_heap_plus::*;
 use cached::proc_macro::cached;
 use itertools::Itertools;
-use std::cmp::{max, min, Reverse};
-use std::collections::HashSet;
-use std::env;
-use std::error::Error;
-use std::fmt;
-use std::fs;
-use std::hash::{Hash, Hasher};
-use std::rc::Rc;
+use std::{
+    cmp::{max, min, Reverse},
+    collections::HashSet,
+    default::default,
+    env,
+    error::Error,
+    fmt, fs,
+    hash::{Hash, Hasher},
+    rc::Rc,
+};
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     let args = env::args().collect_vec();
@@ -25,7 +29,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let result = cave_search(depth, target).expect("No path found");
 
-    println!("Minimum time to target: {:?}", result.path_cost);
+    println!("Minimum time to target: {}", result.path_cost);
 
     Ok(())
 }
@@ -34,20 +38,19 @@ fn cave_search(depth: usize, target: Location) -> Option<CaveNode> {
     const MOVE_COST: usize = 1;
     const SWITCH_COST: usize = 7;
 
+    use Tool::*;
+
     // path_cost and prev don't matter here
     let goal = CaveNode {
         location: target,
-        tool: Some(Tool::Torch),
-        path_cost: 0,
-        prev: None,
+        tool: Some(Torch),
+        ..default()
     };
 
     let mut frontier = BinaryHeap::from_vec_cmp(
         vec![CaveNode {
-            location: Location { x: 0, y: 0 },
-            tool: Some(Tool::Torch),
-            path_cost: 0,
-            prev: None,
+            tool: Some(Torch),
+            ..default()
         }],
         KeyComparator(|n: &CaveNode| {
             Reverse(
@@ -60,9 +63,9 @@ fn cave_search(depth: usize, target: Location) -> Option<CaveNode> {
 
     fn possible_tools(region: Region) -> Vec<Option<Tool>> {
         match region {
-            Region::Rocky => vec![Some(Tool::Torch), Some(Tool::ClimbingGear)],
-            Region::Wet => vec![Some(Tool::ClimbingGear), None],
-            Region::Narrow => vec![Some(Tool::Torch), None],
+            Region::Rocky => vec![Some(Torch), Some(ClimbingGear)],
+            Region::Wet => vec![Some(ClimbingGear), None],
+            Region::Narrow => vec![Some(Torch), None],
         }
     }
 
@@ -121,7 +124,7 @@ fn cave_search(depth: usize, target: Location) -> Option<CaveNode> {
     None
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct CaveNode {
     location: Location,
     tool: Option<Tool>,
@@ -148,11 +151,11 @@ impl Hash for CaveNode {
 
 impl fmt::Debug for CaveNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "({:?}, {:?}, {})",
-            self.location, self.tool, self.path_cost
-        )
+        f.debug_tuple("")
+            .field(&self.location)
+            .field(&self.tool)
+            .field(&self.path_cost)
+            .finish()
     }
 }
 
@@ -177,7 +180,8 @@ fn get_region_type(erosion_level: usize) -> Region {
         0 => Region::Rocky,
         1 => Region::Wet,
         2 => Region::Narrow,
-        _ => unreachable!(),
+        // Mathematically impossible.
+        _ => unsafe { std::hint::unreachable_unchecked() },
     }
 }
 
@@ -225,7 +229,7 @@ fn parse_input(cave_info_str: &str) -> Result<(usize, Location), &str> {
     ))
 }
 
-#[derive(Eq, PartialEq, Hash, Copy, Clone)]
+#[derive(Eq, PartialEq, Default, Hash, Copy, Clone)]
 struct Location {
     x: usize,
     y: usize,
@@ -269,6 +273,6 @@ impl Location {
 
 impl fmt::Debug for Location {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {})", self.x, self.y)
+        f.debug_tuple("").field(&self.x).field(&self.y).finish()
     }
 }

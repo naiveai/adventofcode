@@ -40,8 +40,8 @@ struct Node<T> {
     elem: T,
     parent_idx: usize,
     rank: usize,
-    // We use this to be able to iterate
-    // on each of our subsets.
+    // We use this to be able to iterate on each of our subsets.
+    // This creates a circular linked list of nodes.
     next: usize,
 }
 
@@ -278,14 +278,8 @@ impl<T: Eq> DisjointSet<T> {
             x_root.rank += 1;
         }
 
-        // Drop the RefMuts so we can check self.last,
-        // which needs to immutably borrow, without conflicts.
-        drop(x_root);
-        drop(y_root);
-
-        let x_last_idx = self.last(x_root_idx).unwrap();
-        let mut x_last = self.nodes[x_last_idx].borrow_mut();
-        x_last.next = y_root_idx;
+        // Merge the two set's circular linked lists.
+        mem::swap(&mut x_root.next, &mut y_root.next);
 
         Some(true)
     }
@@ -319,28 +313,22 @@ impl<T: Eq> DisjointSet<T> {
         Some(curr_idx)
     }
 
-    /// Returns the last element of the subset with
-    /// `elem_idx` in it, if it exists.
-    fn last(&self, elem_idx: usize) -> Option<usize> {
-        self.get_set_idxs(elem_idx)?.pop()
-    }
-
     /// Returns the indexes of all the items in the subset
     /// `elem_idx` belongs to in arbitrary order, if it exists.
     fn get_set_idxs(&self, elem_idx: usize) -> Option<Vec<usize>> {
-        let mut curr_idx = self.find_root_idx(elem_idx)?;
+        let mut curr_idx = elem_idx;
         let mut curr = self.nodes[curr_idx].borrow();
 
         let mut set_idxs = Vec::with_capacity(self.num_elements());
 
-        // We can't check the condition up here
-        // using while because that would make
-        // it so the last node is never pushed.
+        // We can't check the condition up here using while because
+        // that would make it so the last node is never pushed.
         loop {
             set_idxs.push(curr_idx);
 
-            // This is the last node
-            if curr_idx == curr.next {
+            // This is the last node because we've looped
+            // back around to where we started.
+            if curr.next == elem_idx {
                 break;
             }
 

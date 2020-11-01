@@ -4,7 +4,7 @@ use itertools::Itertools;
 use std::fs;
 
 fn main() -> Result<(), anyhow::Error> {
-    let matches = App::new("2015-2")
+    let matches = App::new("2019-2")
         .arg(Arg::from_usage("[input] 'Problem input file'").default_value("input.txt"))
         .arg(
             Arg::from_usage("[required_value] -v, --required-value=<VALUE> 'Required value to produce for Part 2'")

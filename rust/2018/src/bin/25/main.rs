@@ -33,7 +33,7 @@ pub fn main() -> Result<(), anyhow::Error> {
 
 // Most of these generic requirements are because of the
 // requirements on `Point::manhattan_distance`. See there for details.
-fn find_chains<N, C, const D: usize>(
+fn find_chains<N, const D: usize, C>(
     points: &Vec<Point<N, D>>,
     chain_distance: C,
 ) -> DisjointSet<Point<N, D>>
@@ -42,24 +42,26 @@ where
     C: 'static + Unsigned + Copy + NumAssignOps + PartialOrd,
 {
     let mut points_ds = DisjointSet::with_capacity(points.len());
-    let mut points_ds_idxs = Vec::with_capacity(points.len());
 
-    for point in points.iter().copied() {
-        let point_ds_idx = points_ds
-            .make_set(point)
-            // We have to map_err to satisfy the compiler because
-            // unwrap requires that the error type (Point<N>) is Debug,
-            // which is not necessarily the case here becuase N: !Debug.
-            .map_err(|_| ())
-            .unwrap();
+    // We map the index of a point in the original list to its index in the DisjointSet.
+    let mut points_set_idxs: Vec<(usize, usize)> = Vec::with_capacity(points.len());
 
-        for (other_point_idx, &other_point_ds_idx) in points_ds_idxs.iter().enumerate() {
-            if point.manhattan_distance(&points[other_point_idx]) <= chain_distance {
-                points_ds.union(point_ds_idx, other_point_ds_idx);
+    for (point_idx, point) in points.iter().copied().enumerate() {
+        let point_set_idx = match points_ds.make_set(point) {
+            Ok(i) => i,
+            // This means there are duplicate points, which we can ignore.
+            Err(_) => continue,
+        };
+
+        for &(other_point_idx, other_point_set_idx) in points_set_idxs.iter() {
+            let other_point = &points[other_point_idx];
+
+            if point.manhattan_distance(other_point) <= chain_distance {
+                points_ds.union(point_set_idx, other_point_set_idx);
             }
         }
 
-        points_ds_idxs.push(point_ds_idx);
+        points_set_idxs.push((point_idx, point_set_idx));
     }
 
     points_ds
@@ -87,18 +89,21 @@ where
         })
         .try_collect()
 }
+
 #[derive(Clone, Copy, From, Index, Eq, PartialEq, Hash)]
 struct Point<N: Num, const D: usize>([N; D]);
 
 impl<N: Num + Default, const D: usize> Default for Point<N, D> {
     fn default() -> Self {
         Self(
-            iter::repeat_with(N::default)
+            match iter::repeat_with(N::default)
                 .take(D)
                 .collect_vec()
                 .try_into()
-                .map_err(|_| ())
-                .unwrap(),
+            {
+                Ok(array) => array,
+                Err(_) => unsafe { std::hint::unreachable_unchecked() },
+            },
         )
     }
 }

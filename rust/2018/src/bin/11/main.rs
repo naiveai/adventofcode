@@ -2,8 +2,6 @@ use std::{env, error::Error, fmt, fs};
 
 const GRID_SIZE: (usize, usize) = (300, 300);
 
-type Grid = Vec<Vec<isize>>;
-
 pub fn main() -> Result<(), Box<dyn Error>> {
     let args = env::args().collect::<Vec<String>>();
 
@@ -46,7 +44,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn construct_grid(grid_serial_number: usize, grid_size: (usize, usize)) -> Grid {
+fn construct_grid(grid_serial_number: usize, grid_size: (usize, usize)) -> Vec<Vec<isize>> {
     let power_level = |x: usize, y: usize| -> isize {
         let rack_id = x + 10;
         let mut power_level = rack_id * y + grid_serial_number;
@@ -60,7 +58,7 @@ fn construct_grid(grid_serial_number: usize, grid_size: (usize, usize)) -> Grid 
         .collect()
 }
 
-fn compute_summed_area_table(grid: &Grid) -> Result<Grid, NonRectError> {
+fn compute_summed_area_table(grid: &[Vec<isize>]) -> Result<Vec<Vec<isize>>, NonRectError> {
     // Asumming the grid is actually rectangular, we can assign all
     // the Vecs with the same row-length capacity to help optimize
     // with memory a teeny bit.

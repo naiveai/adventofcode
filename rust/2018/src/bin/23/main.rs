@@ -13,7 +13,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     let bot_info_str = fs::read_to_string(input_filename)?;
     let bots = parse_input(&bot_info_str)?;
 
-    let best_point = find_best_point_z3(bots).ok_or(anyhow!("No best point found"))?;
+    let best_point = find_best_point_z3(bots).ok_or_else(|| anyhow!("No best point found"))?;
 
     println!(
         "Best teleporation point: {:?}. Manhattan distance to origin: {}",
@@ -115,17 +115,17 @@ fn parse_input(bot_info_str: &str) -> Result<Vec<Bot>, anyhow::Error> {
         let (position_str, radius_str) = bot_info_line
             .split(", ")
             .collect_tuple()
-            .ok_or(anyhow!("Invalid bot info line format"))?;
+            .ok_or_else(|| anyhow!("Invalid bot info line format"))?;
 
         bots.push(Bot {
             location: position_str
                 .strip_prefix("pos=")
-                .ok_or(anyhow!("Invalid position format"))?
+                .ok_or_else(|| anyhow!("Invalid position format"))?
                 .trim_matches(|c| c == '<' || c == '>')
                 .parse()?,
             signal_radius: radius_str
                 .strip_prefix("r=")
-                .ok_or(anyhow!("Invalid radius string format"))?
+                .ok_or_else(|| anyhow!("Invalid radius string format"))?
                 .parse()
                 .context("Radius string is not a number")?,
         });

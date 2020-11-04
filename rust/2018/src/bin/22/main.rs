@@ -110,7 +110,7 @@ fn cave_search(depth: usize, target: Location) -> Option<CaveNode> {
             continue;
         }
 
-        if &current == &goal {
+        if current == goal {
             return Some(current);
         }
 
@@ -212,7 +212,7 @@ fn parse_input(cave_info_str: &str) -> Result<(usize, Location), &str> {
     );
 
     let (target_x_str, target_y_str) = target_str
-        .split(",")
+        .split(',')
         .collect_tuple()
         .ok_or("Invalid target coordinate format")?;
 

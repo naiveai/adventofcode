@@ -34,8 +34,8 @@ pub fn main() -> Result<(), anyhow::Error> {
     if matches.is_present("p1") {
         println!("Battle without boosts:");
 
-        let no_boost_result = battle_to_end(groups.clone(), None, None)
-            .ok_or(anyhow!("Input results in a stalemate"))?;
+        let no_boost_result = battle_to_end(groups, None, None)
+            .ok_or_else(|| anyhow!("Input results in a stalemate"))?;
         battle_victor_info(&no_boost_result);
     } else if let Some(boosted_armies_iter) = matches.values_of("boosted") {
         let boosted_armies = boosted_armies_iter.collect_vec();
@@ -60,7 +60,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-fn battle_victor_info(groups: &Vec<UnitGroup>) {
+fn battle_victor_info(groups: &[UnitGroup]) {
     println!(
         "{:?} wins with {:?} units left",
         groups[0].army,

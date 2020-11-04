@@ -1,6 +1,6 @@
 #![feature(fn_traits)]
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use clap::{App, Arg};
 use itertools::Itertools;
 use std::fmt;
@@ -42,12 +42,7 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     let mut prev_special_regs = vec![];
 
-    loop {
-        let ins = match code.get(regs[ins_pointer]) {
-            Some(ins) => ins,
-            None => break,
-        };
-
+    while let Some(ins) = code.get(regs[ins_pointer]) {
         if debug {
             println!("Executing {:?} at {}", ins, regs[ins_pointer]);
         }
@@ -60,7 +55,7 @@ pub fn main() -> Result<(), anyhow::Error> {
         }
 
         if ins.name == "eqrr" {
-            if p1 && prev_special_regs.len() == 0 {
+            if p1 && prev_special_regs.is_empty() {
                 println!("Part 1: {:?}", regs[special_reg]);
                 if !p2 {
                     break;
@@ -91,7 +86,7 @@ fn parse_input(code_str: &str) -> Result<(usize, Vec<Instruction>), anyhow::Erro
     let ins_pointer = code_lines
         .next()
         .map(|s| s.trim_start_matches("#ip "))
-        .ok_or(anyhow!("Instruction pointer not found"))?
+        .ok_or_else(|| anyhow!("Instruction pointer not found"))?
         .parse()?;
 
     let code = code_lines
@@ -99,7 +94,7 @@ fn parse_input(code_str: &str) -> Result<(usize, Vec<Instruction>), anyhow::Erro
             let (op_str, inp1, inp2, output_reg) = c
                 .split_whitespace()
                 .collect_tuple()
-                .ok_or(anyhow!("Instruction not in correct format"))?;
+                .ok_or_else(|| anyhow!("Instruction not in correct format"))?;
 
             let inp1: usize = inp1.parse()?;
             let inp2: usize = inp2.parse()?;
@@ -202,7 +197,7 @@ fn parse_input(code_str: &str) -> Result<(usize, Vec<Instruction>), anyhow::Erro
                     input: [Value::Reg(inp1), Value::Reg(inp2)],
                     output_reg,
                 },
-                _ => Err(anyhow!("Invalid operation"))?,
+                _ => bail!("Invalid operation"),
             })
         })
         .collect::<Result<Vec<_>, _>>()?;

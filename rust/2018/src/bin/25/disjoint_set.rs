@@ -348,15 +348,23 @@ impl<T: Eq + fmt::Debug> fmt::Debug for DisjointSet<T> {
     }
 }
 
+impl<T: Eq> Default for DisjointSet<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Eq> Index<usize> for DisjointSet<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
-        self.get(index).expect(&format!(
-            "index out of bounds: the len is {} but the index is {}",
-            self.num_elements(),
-            index
-        ))
+        self.get(index).unwrap_or_else(|| {
+            panic!(
+                "index out of bounds: the len is {} but the index is {}",
+                self.num_elements(),
+                index
+            )
+        })
     }
 }
 

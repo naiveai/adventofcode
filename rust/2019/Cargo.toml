@@ -13,3 +13,4 @@ derive_more = "0.99"
 digits_iterator = "0.1"
 multimap = "0.8"
 futures = { version = "0.3", features = ["thread-pool"] }
+flume = "0.9"

@@ -1,9 +1,13 @@
 use anyhow::{anyhow, bail, ensure};
 use clap::{App, Arg};
 use digits_iterator::*;
-use futures::executor::ThreadPool;
 use itertools::Itertools;
-use std::{convert::TryFrom, fs, iter};
+use std::{convert::TryFrom, fs};
+use tokio::{
+    pin,
+    stream::{self, Stream, StreamExt},
+    task,
+};
 
 fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("2019-5")
@@ -32,11 +36,19 @@ fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-// Eric asks us to effectively implement Intcode multithreading,
-// or at the very least concurrency. To which I say, "Hah! No."
-// and use Rust futures, which makes for a really overengineered
-// solution but whatever I wanted to learn about async in Rust anyway.
-fn find_max_thruster_val_looped(
+// Eric asks us to effectively implement Intcode multithreading, or at
+// the very least concurrency. To which I say, "Hah! No." and use Rust
+// futures, which makes for a really overengineered solution but whatever
+// I wanted to learn about async in Rust anyway. Unfortunately, I did
+// have to change run_program to use .await & streams in order to yield
+// to yield to the runtime correctly, but other than that, Rust handles
+// all the interrupting and restarting for us which I think does make
+// everything clearer. Tokio's tasks are really cheap to start up and
+// destroy, and the creators of Tokio have a lot more experience with
+// this stuff, so there shouldn't really be any performance penalty
+// when compared to sitting there and implementing everything ourselves.
+#[tokio::main(flavor = "current_thread")]
+async fn find_max_thruster_val_looped(
     program: Vec<isize>,
     num_amps: usize,
 ) -> Result<(isize, Vec<usize>), anyhow::Error> {
@@ -44,23 +56,14 @@ fn find_max_thruster_val_looped(
 
     let mut thruster_outputs = vec![];
 
-    // Yes I do realize that this only works because it effectively
-    // just uses threads directly, and doesn't make use of task switching.
-    // If you have a ThreadPool of size < num_amps, you'll keep blocking forever.
-    // I intend to fix this... sometime, hopefully.
-    let thread_pool = ThreadPool::builder()
-        .pool_size(num_amps)
-        .name_prefix("amplifier")
-        .create()
-        .map_err(|_| anyhow!("Unable to create thread pool"))?;
-
     for phase_settings in (5usize..=9).permutations(num_amps) {
-        // We're using mpsc channels to set up a pipeline for the signals that goes
+        // We're using flume channels to set up a pipeline for the signals that goes
         // Main ═╦═ Amp 1 ══ Amp 2 ════ ... ════╦═ Main
         //       ╚══════════════════════════════╝
         // So we need to get the previous iteration's RX for input, and create a
         // new channel and use its TX for each amp's output.
         let (main_tx, first_rx) = flume::unbounded();
+        main_tx.send(0)?;
 
         let mut curr_rx = first_rx;
 
@@ -72,30 +75,35 @@ fn find_max_thruster_val_looped(
             let program = program.clone();
             let mut disconnected_tx = false;
 
-            thread_pool.spawn_ok(async move {
+            task::spawn(async move {
                 run_program(
                     program,
-                    iter::once(current_phase_setting as isize).chain(input_rx),
-                    |o| {
+                    stream::once(current_phase_setting as isize).chain(input_rx.into_stream()),
+                    |output| {
                         if !disconnected_tx {
-                            if output_tx.send(o).is_err() {
+                            if output_tx.send(output).is_err() {
                                 disconnected_tx = true;
-                                eprintln!("An amplifier has disconnected while output is still available.")
+
+                                // Propogating errors is still kind of a question mark for me, and this is
+                                // a scenario that theoretically "shouldn't happen" anyway, so just inform
+                                // the user in case it does.
+                                eprintln!(concat!(
+                                    "An amplifier has disconnected while output is still available. ",
+                                    "This usually means the amplifier Intcode program is written incorrectly."
+                                ));
                             }
                         }
                     },
-                ).unwrap();
+                ).await.unwrap();
             });
         }
 
         let main_rx = curr_rx;
 
-        main_tx.send(0)?;
-
-        for n in main_rx {
+        while let Ok(thruster_val) = main_rx.recv_async().await {
             // Loop back around, unless the first amplifier is done.
-            if main_tx.send(n).is_err() {
-                thruster_outputs.push((n, phase_settings));
+            if main_tx.send(thruster_val).is_err() {
+                thruster_outputs.push((thruster_val, phase_settings));
                 break;
             }
         }
@@ -114,14 +122,14 @@ fn find_max_thruster_val(
     let mut thruster_outputs = vec![];
 
     for phase_settings in (0..=4).permutations(num_amps) {
-        let thruster_val = (0..num_amps).try_fold(0, |acc, i| {
+        let thruster_val = (0..num_amps).try_fold(0, |prev_output, i| {
             let mut output = vec![];
 
-            run_program(
+            futures_executor::block_on(run_program(
                 program.clone(),
-                vec![phase_settings[i] as isize, acc],
+                stream::iter([phase_settings[i] as isize, prev_output].iter().copied()),
                 |o| output.push(o),
-            )?;
+            ))?;
 
             Ok::<_, anyhow::Error>(*output.last().ok_or_else(|| {
                 anyhow!(
@@ -141,12 +149,12 @@ fn find_max_thruster_val(
         .ok_or_else(|| anyhow!("Couldn't find a maximum thruster value"))
 }
 
-fn run_program(
+async fn run_program(
     mut program: Vec<isize>,
-    input: impl IntoIterator<Item = isize>,
+    input: impl Stream<Item = isize>,
     mut output_fn: impl FnMut(isize),
 ) -> Result<Vec<isize>, anyhow::Error> {
-    let mut input = input.into_iter();
+    pin!(input);
 
     let mut instruction_pointer = 0;
 
@@ -247,6 +255,7 @@ fn run_program(
                     3 => {
                         let input = input
                             .next()
+                            .await
                             .ok_or(anyhow!("Found an input opcode but no input was provided"))?;
                         let input_storage = get_param(0, true)? as usize;
 

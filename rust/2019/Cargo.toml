@@ -12,6 +12,5 @@ indexmap = "1.6"
 derive_more = "0.99"
 digits_iterator = "0.1"
 multimap = "0.8"
-futures-executor = "0.3"
 tokio = { version = "0.3", features = ["rt", "stream", "macros"] }
 flume = "0.9"

@@ -19,14 +19,14 @@ fn main() -> Result<(), anyhow::Error> {
     let program_str = fs::read_to_string(input_filename)?.replace("\r\n", "\n");
     let program = parse_input(&program_str)?;
 
-    let (max_thruster_val, max_phase_settings) = find_max_thruster_val(program.clone(), 5)?;
+    let (max_thruster_val, max_phase_settings) = find_max_thruster_val(program.clone(), 0..=4)?;
 
     println!(
         "Maximum thruster value: {} achieved with phase settings {:?}, without feedback loops",
         max_thruster_val, max_phase_settings
     );
 
-    let (max_thruster_val, max_phase_settings) = find_max_thruster_val_looped(program.clone(), 5)?;
+    let (max_thruster_val, max_phase_settings) = find_max_thruster_val(program, 5..=9)?;
 
     println!(
         "Maximum thruster value: {} achieved with phase settings {:?}, with feedback loops",
@@ -34,6 +34,25 @@ fn main() -> Result<(), anyhow::Error> {
     );
 
     Ok(())
+}
+
+fn find_max_thruster_val(
+    program: Vec<isize>,
+    phase_settings_range: impl IntoIterator<Item = usize>,
+) -> Result<(isize, Vec<usize>), anyhow::Error> {
+    let mut thruster_values = Vec::with_capacity(120);
+
+    for phase_settings in phase_settings_range.into_iter().permutations(5) {
+        thruster_values.push((
+            run_amplifiers(program.clone(), phase_settings.clone())?,
+            phase_settings,
+        ));
+    }
+
+    thruster_values
+        .into_iter()
+        .max_by_key(|&(val, _)| val)
+        .ok_or_else(|| anyhow!("Couldn't find a maximum thruster value"))
 }
 
 // Eric asks us to effectively implement Intcode multithreading, or at
@@ -48,105 +67,59 @@ fn main() -> Result<(), anyhow::Error> {
 // this stuff, so there shouldn't really be any performance penalty
 // when compared to sitting there and implementing everything ourselves.
 #[tokio::main(flavor = "current_thread")]
-async fn find_max_thruster_val_looped(
+async fn run_amplifiers(
     program: Vec<isize>,
-    num_amps: usize,
-) -> Result<(isize, Vec<usize>), anyhow::Error> {
-    ensure!(num_amps != 0, "Can't have 0 amplifiers");
+    phase_settings: Vec<usize>,
+) -> Result<isize, anyhow::Error> {
+    // We're using flume channels to set up a pipeline for the signals that goes
+    // Main ═╦═ Amp 1 ══ Amp 2 ════ ... ════╦═ Main
+    //       ╚══════════════════════════════╝
+    // So we need to get the previous iteration's RX for input, and create a
+    // new channel and use its TX for each amp's output.
+    let (main_tx, first_rx) = flume::unbounded();
+    main_tx.send(0)?;
 
-    let mut thruster_outputs = vec![];
+    let mut curr_rx = first_rx;
 
-    for phase_settings in (5usize..=9).permutations(num_amps) {
-        // We're using flume channels to set up a pipeline for the signals that goes
-        // Main ═╦═ Amp 1 ══ Amp 2 ════ ... ════╦═ Main
-        //       ╚══════════════════════════════╝
-        // So we need to get the previous iteration's RX for input, and create a
-        // new channel and use its TX for each amp's output.
-        let (main_tx, first_rx) = flume::unbounded();
-        main_tx.send(0)?;
+    for &current_phase_setting in phase_settings.iter() {
+        let (output_tx, next_rx) = flume::unbounded();
+        let input_rx = curr_rx;
+        curr_rx = next_rx;
 
-        let mut curr_rx = first_rx;
+        let program = program.clone();
+        let mut disconnected_tx = false;
 
-        for &current_phase_setting in phase_settings.iter() {
-            let (output_tx, next_rx) = flume::unbounded();
-            let input_rx = curr_rx;
-            curr_rx = next_rx;
+        task::spawn(run_program(
+            program,
+            stream::once(current_phase_setting as isize).chain(input_rx.into_stream()),
+            move |output| {
+                if !disconnected_tx {
+                    if output_tx.send(output).is_err() {
+                        disconnected_tx = true;
 
-            let program = program.clone();
-            let mut disconnected_tx = false;
+                        // Propogating errors is still kind of a question mark for me, and this is
+                        // a scenario that theoretically "shouldn't happen" anyway, so just inform
+                        // the user in case it does.
+                        eprintln!(concat!(
+                                "An amplifier has disconnected while output is still available. ",
+                                "This usually means the amplifier Intcode program is written incorrectly."
+                            ));
+                    }
+                }
+            },
+        ));
+    }
 
-            task::spawn(async move {
-                run_program(
-                    program,
-                    stream::once(current_phase_setting as isize).chain(input_rx.into_stream()),
-                    |output| {
-                        if !disconnected_tx {
-                            if output_tx.send(output).is_err() {
-                                disconnected_tx = true;
+    let main_rx = curr_rx;
 
-                                // Propogating errors is still kind of a question mark for me, and this is
-                                // a scenario that theoretically "shouldn't happen" anyway, so just inform
-                                // the user in case it does.
-                                eprintln!(concat!(
-                                    "An amplifier has disconnected while output is still available. ",
-                                    "This usually means the amplifier Intcode program is written incorrectly."
-                                ));
-                            }
-                        }
-                    },
-                ).await.unwrap();
-            });
-        }
-
-        let main_rx = curr_rx;
-
-        while let Ok(thruster_val) = main_rx.recv_async().await {
-            // Loop back around, unless the first amplifier is done.
-            if main_tx.send(thruster_val).is_err() {
-                thruster_outputs.push((thruster_val, phase_settings));
-                break;
-            }
+    while let Ok(thruster_val) = main_rx.recv_async().await {
+        // Loop back around, unless the first amplifier is done.
+        if main_tx.send(thruster_val).is_err() {
+            return Ok(thruster_val);
         }
     }
 
-    thruster_outputs
-        .into_iter()
-        .max_by_key(|&(val, _)| val)
-        .ok_or_else(|| anyhow!("Couldn't find a maximum thruster value"))
-}
-
-fn find_max_thruster_val(
-    program: Vec<isize>,
-    num_amps: usize,
-) -> Result<(isize, Vec<usize>), anyhow::Error> {
-    let mut thruster_outputs = vec![];
-
-    for phase_settings in (0..=4).permutations(num_amps) {
-        let thruster_val = (0..num_amps).try_fold(0, |prev_output, i| {
-            let mut output = vec![];
-
-            futures_executor::block_on(run_program(
-                program.clone(),
-                stream::iter([phase_settings[i] as isize, prev_output].iter().copied()),
-                |o| output.push(o),
-            ))?;
-
-            Ok::<_, anyhow::Error>(*output.last().ok_or_else(|| {
-                anyhow!(
-                    "Amplifier {} gave no output on phase settings {:?}",
-                    i,
-                    phase_settings
-                )
-            })?)
-        })?;
-
-        thruster_outputs.push((thruster_val, phase_settings));
-    }
-
-    thruster_outputs
-        .into_iter()
-        .max_by_key(|&(val, _)| val)
-        .ok_or_else(|| anyhow!("Couldn't find a maximum thruster value"))
+    bail!("Thruster value cannot be computed.");
 }
 
 async fn run_program(

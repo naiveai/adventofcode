@@ -1,11 +1,11 @@
 #![allow(incomplete_features)]
-#![feature(const_generics, specialization, refcell_take, type_alias_impl_trait)]
+#![feature(min_const_generics, specialization, refcell_take, type_alias_impl_trait)]
 
 mod disjoint_set;
 
 use anyhow::anyhow;
 use clap::{App, Arg};
-use derive_more::{From, Index};
+use derive_more::From;
 use disjoint_set::DisjointSet;
 use itertools::Itertools;
 use num::{
@@ -33,7 +33,7 @@ pub fn main() -> Result<(), anyhow::Error> {
 
 // Most of these generic requirements are because of the
 // requirements on `Point::manhattan_distance`. See there for details.
-fn find_chains<N, const D: usize, C>(
+fn find_chains<N, C, const D: usize>(
     points: &Vec<Point<N, D>>,
     chain_distance: C,
 ) -> DisjointSet<Point<N, D>>
@@ -90,7 +90,7 @@ where
         .try_collect()
 }
 
-#[derive(Clone, Copy, From, Index, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, From, Eq, PartialEq, Hash)]
 struct Point<N: Num, const D: usize>([N; D]);
 
 impl<N: Num + Default, const D: usize> Default for Point<N, D> {

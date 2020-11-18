@@ -15,3 +15,4 @@ multimap = "0.8"
 futures-executor = "0.3"
 tokio = { version = "0.3", features = ["rt", "stream", "macros"] }
 flume = "0.9"
+ordered-float = "2.0"

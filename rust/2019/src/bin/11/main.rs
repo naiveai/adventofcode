@@ -41,8 +41,16 @@ fn main() -> Result<(), anyhow::Error> {
 
 fn print_hull(hull: &HashMap<Point, Color>, default_color: Color) {
     let ((min_x, max_x), (min_y, max_y)) = (
-        hull.keys().map(|p| p.x).minmax().into_option().unwrap_or_default(),
-        hull.keys().map(|p| p.y).minmax().into_option().unwrap_or_default(),
+        hull.keys()
+            .map(|p| p.x)
+            .minmax()
+            .into_option()
+            .unwrap_or_default(),
+        hull.keys()
+            .map(|p| p.y)
+            .minmax()
+            .into_option()
+            .unwrap_or_default(),
     );
 
     for y in (min_y..=max_y).rev() {

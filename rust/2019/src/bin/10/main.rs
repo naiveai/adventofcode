@@ -1,4 +1,4 @@
-#![feature(iter_partition_in_place)]
+#![feature(iter_partition_in_place, box_syntax)]
 
 use anyhow::{anyhow, bail};
 use clap::{App, Arg};
@@ -6,7 +6,7 @@ use derive_more::From;
 use itertools::Itertools;
 use multimap::MultiMap;
 use ordered_float::OrderedFloat;
-use std::{cmp::Reverse, collections::HashSet, fmt, fs};
+use std::{cmp::Reverse, collections::HashSet, fmt, fs, iter};
 
 fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("2019-10")
@@ -44,46 +44,29 @@ fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-fn iter_vaporize_from(station: Point, asteroid_positions: HashSet<Point>) -> IterVaporize {
-    IterVaporize {
-        station,
-        asteroid_positions,
-        current_visible_iter: None,
-    }
-}
-
-struct IterVaporize {
+fn iter_vaporize_from(
     station: Point,
-    asteroid_positions: HashSet<Point>,
-    current_visible_iter: Option<IterVisible>,
-}
+    mut asteroid_positions: HashSet<Point>,
+) -> impl Iterator<Item = Point> {
+    let mut current_visible_iter: Option<Box<dyn Iterator<Item = Point>>> = None;
 
-impl IterVaporize {
-    fn next_visible(&mut self) -> Option<Point> {
-        self.current_visible_iter.as_mut().and_then(|i| i.next())
-    }
-}
-
-impl Iterator for IterVaporize {
-    type Item = Point;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(next_vaporized) = self.next_visible() {
-            self.asteroid_positions.remove(&next_vaporized);
+    iter::from_fn(move || {
+        if let Some(next_vaporized) = current_visible_iter.as_mut().and_then(|i| i.next()) {
+            asteroid_positions.remove(&next_vaporized);
 
             Some(next_vaporized)
         } else {
-            self.current_visible_iter = Some(iter_visible_from(
-                self.station,
-                self.asteroid_positions.clone(),
-            ));
+            current_visible_iter = Some(box iter_visible_from(station, asteroid_positions.clone()));
 
-            self.next_visible()
+            current_visible_iter.as_mut().and_then(|i| i.next())
         }
-    }
+    })
 }
 
-fn iter_visible_from(station: Point, asteroid_positions: HashSet<Point>) -> IterVisible {
+fn iter_visible_from(
+    station: Point,
+    asteroid_positions: HashSet<Point>,
+) -> impl Iterator<Item = Point> {
     let mut relative_slopes = all_slopes_relative(station, asteroid_positions)
         .into_iter()
         .collect_vec();

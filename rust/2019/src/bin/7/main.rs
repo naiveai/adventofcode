@@ -2,7 +2,8 @@ use anyhow::{anyhow, bail, ensure};
 use clap::{App, Arg};
 use digits_iterator::*;
 use itertools::Itertools;
-use std::{convert::TryFrom, fs};
+use rayon::prelude::*;
+use std::{cmp, convert::TryFrom, fs};
 use tokio::{
     pin,
     stream::{self, Stream, StreamExt},
@@ -40,19 +41,24 @@ fn find_max_thruster_val(
     program: Vec<isize>,
     phase_settings_range: impl IntoIterator<Item = usize>,
 ) -> Result<(isize, Vec<usize>), anyhow::Error> {
-    let mut thruster_values = Vec::with_capacity(120);
-
-    for phase_settings in phase_settings_range.into_iter().permutations(5) {
-        thruster_values.push((
-            run_amplifiers(program.clone(), phase_settings.clone())?,
-            phase_settings,
-        ));
-    }
-
-    thruster_values
+    // Using Rayon is definitely overkill but hey, whatever.
+    phase_settings_range
         .into_iter()
-        .max_by_key(|&(val, _)| val)
-        .ok_or_else(|| anyhow!("Couldn't find a maximum thruster value"))
+        .permutations(5)
+        // We must collect because the Permuations iterator's Item
+        // isn't Send, which is required by Rayon.
+        .collect_vec()
+        .into_par_iter()
+        .map(|phase_settings_permutation| {
+            Ok((
+                run_amplifiers(program.clone(), phase_settings_permutation.clone())?,
+                phase_settings_permutation,
+            ))
+        })
+        .try_reduce(
+            || (isize::MIN, vec![]),
+            |current_max, thruster_result| Ok(cmp::max(thruster_result, current_max)),
+        )
 }
 
 // Eric asks us to effectively implement Intcode multithreading, or at
@@ -101,9 +107,9 @@ async fn run_amplifiers(
                         // a scenario that theoretically "shouldn't happen" anyway, so just inform
                         // the user in case it does.
                         eprintln!(concat!(
-                                "An amplifier has disconnected while output is still available. ",
-                                "This usually means the amplifier Intcode program is written incorrectly."
-                            ));
+                            "An amplifier has disconnected while output is still available. ",
+                            "This usually means the amplifier Intcode program is written incorrectly."
+                        ));
                     }
                 }
             },

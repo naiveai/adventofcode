@@ -1,5 +1,5 @@
 #![allow(incomplete_features)]
-#![feature(min_const_generics, specialization, refcell_take, type_alias_impl_trait)]
+#![feature(min_const_generics, specialization, type_alias_impl_trait)]
 
 mod disjoint_set;
 

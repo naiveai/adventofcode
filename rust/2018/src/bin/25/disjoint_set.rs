@@ -1,5 +1,5 @@
+use parking_lot::RwLock;
 use std::{
-    cell::RefCell,
     collections::HashSet,
     convert::TryFrom,
     fmt,
@@ -29,17 +29,17 @@ use std::{
 /// ```
 // Details about the algorithm used here can be found
 // at the Wikipedia page for "Disjoint-set data structure".
-#[derive(Clone)]
 pub struct DisjointSet<T: Eq> {
     roots: HashSet<usize>,
-    nodes: Vec<RefCell<Node<T>>>,
+    // Each elem idx corresponds to the same idx in nodes
+    elems: Vec<T>,
+    nodes: Vec<RwLock<Node>>,
 }
 
-#[derive(Default, Clone)]
-struct Node<T> {
-    elem: T,
-    parent_idx: usize,
+#[derive(Clone, Copy)]
+struct Node {
     rank: usize,
+    parent_idx: usize,
     // We use this to be able to iterate on each of our subsets.
     // This creates a circular linked list of nodes.
     next: usize,
@@ -49,16 +49,18 @@ impl<T: Eq> DisjointSet<T> {
     /// Creates an empty `DisjointSet`.
     pub fn new() -> Self {
         Self {
-            nodes: vec![],
             roots: HashSet::new(),
+            nodes: vec![],
+            elems: vec![],
         }
     }
 
     /// Creates a new `DisjointSet` with the given capacity.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            nodes: Vec::with_capacity(capacity),
             roots: HashSet::new(),
+            nodes: Vec::with_capacity(capacity),
+            elems: Vec::with_capacity(capacity),
         }
     }
 
@@ -69,7 +71,7 @@ impl<T: Eq> DisjointSet<T> {
 
     /// Returns the number of total elements in all subsets.
     pub fn num_elements(&self) -> usize {
-        self.nodes.len()
+        self.elems.len()
     }
 
     /// Returns true if the given element is present in the `DisjointSet`.
@@ -79,7 +81,7 @@ impl<T: Eq> DisjointSet<T> {
 
     /// Returns the index of the given element if it exists, or None otherwise.
     pub fn position(&self, elem: &T) -> Option<usize> {
-        self.nodes.iter().position(|e| &e.borrow().elem == elem)
+        self.elems.iter().position(|e| e == elem)
     }
 
     /// Adds a new set with a single, given element to
@@ -90,12 +92,13 @@ impl<T: Eq> DisjointSet<T> {
         if !self.contains(&elem) {
             // This is the index where the node will be inserted,
             // thanks to the magic of zero-indexing.
-            let insertion_idx = self.nodes.len();
+            let insertion_idx = self.elems.len();
 
-            self.nodes.push(RefCell::new(Node {
-                elem,
-                parent_idx: insertion_idx,
+            self.elems.push(elem);
+
+            self.nodes.push(RwLock::new(Node {
                 rank: 0,
+                parent_idx: insertion_idx,
                 next: insertion_idx,
             }));
 
@@ -109,26 +112,12 @@ impl<T: Eq> DisjointSet<T> {
 
     /// If present, returns an immutable reference to the element at `elem_idx`.
     pub fn get(&self, elem_idx: usize) -> Option<&T> {
-        // Nothing in our code actually mutates node.elem: T using &self.
-        // Even find_root_idx uses interior mutability only
-        // to modify node.parent. And the caller can't
-        // call get_mut or iter_mut_set while the &T here is
-        // still in scope. So it all works out!
-        Some(unsafe { &*self.get_raw(elem_idx)? })
+        self.elems.get(elem_idx)
     }
 
     /// If present, returns a mutable reference to the element at `elem_idx`.
     pub fn get_mut(&mut self, elem_idx: usize) -> Option<&mut T> {
-        // RefCall::get_mut is used rarely, but here it's appropriate:
-        // As long as the &mut T from this is still in scope,
-        // the caller won't be able to use any other methods,
-        // so interior mutability isn't a concern.
-        Some(&mut self.nodes.get_mut(elem_idx)?.get_mut().elem)
-    }
-
-    /// If present, returns a raw pointer to the element at `elem_idx`.
-    fn get_raw(&self, elem_idx: usize) -> Option<*mut T> {
-        unsafe { Some(&mut (*self.nodes.get(elem_idx)?.as_ptr()).elem as *mut _) }
+        self.elems.get_mut(elem_idx)
     }
 
     /// Returns an `&T` iterator over all elements in the set
@@ -155,9 +144,9 @@ impl<T: Eq> DisjointSet<T> {
         let set_idxs = self.get_set_idxs(elem_idx)?;
 
         Some(set_idxs.into_iter().map(move |i| {
-            // In reality this is safe because there'll
-            // be no duplicate indexes. But Rust doesn't
-            // have any way of knowing that.
+            // SAFETY: We're in a &mut self context, so
+            // the current thread has exclusive access,
+            // and there are no duplicate indexes in the set.
             unsafe { &mut *(self.get_mut(i).unwrap() as *mut _) }
         }))
     }
@@ -167,10 +156,14 @@ impl<T: Eq> DisjointSet<T> {
         &self,
     ) -> impl ExactSizeIterator<Item = impl ExactSizeIterator<Item = &T> + DoubleEndedIterator>
            + DoubleEndedIterator {
-        // Put roots into a Vec to satisfy DoubleEndedIterator
-        let roots = self.roots.iter().collect::<Vec<_>>();
+        let roots = self.roots.clone();
 
-        roots.into_iter().map(move |&r| self.iter_set(r).unwrap())
+        roots
+            .iter()
+            .map(|&r| self.iter_set(r).unwrap())
+            // Use Vec to satisfy DoubleEndedIterator
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 
     /// Returns a second-order iterator of `&mut T` of all the subsets.
@@ -181,17 +174,20 @@ impl<T: Eq> DisjointSet<T> {
         // This function can't be as simple as iter_all_sets,
         // because Rust won't like it if we just straight up take
         // &mut self several times over.
-        self.roots
+        let roots = self.roots.clone();
+
+        roots
             .iter()
             .map(|&root| {
                 self.get_set_idxs(root)
                     .unwrap()
                     .into_iter()
                     .map(|i| {
-                        // No duplicate indexes means that using this
-                        // pointer as a &mut T is safe. We can't
-                        // use get_mut here because that takes &mut self.
-                        unsafe { &mut *self.get_raw(i).unwrap() }
+                        // SAFETY: We're in a &mut self context,
+                        // so the current thread has exclusive access,
+                        // and there are no duplicate indexes in each set
+                        // or among sets.
+                        unsafe { &mut *(self.get_mut(i).unwrap() as *mut _) }
                     })
                     .collect::<Vec<_>>()
             })
@@ -252,15 +248,15 @@ impl<T: Eq> DisjointSet<T> {
         );
 
         // We don't have to do anything if this is the case.
-        // Also, if we didn't check this, we'd panic below because
-        // we'd attempt two mutable borrowings of the same RefCell.
+        // Also, if we didn't check this, we'd block forever below because
+        // we'd attempt to obtain two mutable locks of the same RwLock.
         if x_root_idx == y_root_idx {
             return Some(false);
         }
 
         let (mut x_root, mut y_root) = (
-            self.nodes[x_root_idx].borrow_mut(),
-            self.nodes[y_root_idx].borrow_mut(),
+            self.nodes[x_root_idx].write(),
+            self.nodes[y_root_idx].write(),
         );
 
         if x_root.rank < y_root.rank {
@@ -292,18 +288,19 @@ impl<T: Eq> DisjointSet<T> {
         }
 
         let mut curr_idx = elem_idx;
-        let mut curr = self.nodes.get(curr_idx)?.borrow_mut();
+        let mut curr = self.nodes.get(curr_idx)?.upgradable_read();
 
         while curr.parent_idx != curr_idx {
             let parent_idx = curr.parent_idx;
-            let parent = self.nodes[parent_idx].borrow_mut();
+            let parent = self.nodes[parent_idx].upgradable_read();
 
             // Set the current node's parent to its grandparent.
             // This is called *path splitting*: (see the Wikipedia
             // page for details) a simpler to implement, one-pass
             // version of path compression that also, apparently,
             // turns out to be more efficient in practice.
-            curr.parent_idx = parent.parent_idx;
+            let mut mut_curr = parking_lot::RwLockUpgradableReadGuard::upgrade(curr);
+            mut_curr.parent_idx = parent.parent_idx;
 
             // Move up a level for the next iteration
             curr_idx = parent_idx;
@@ -317,7 +314,7 @@ impl<T: Eq> DisjointSet<T> {
     /// `elem_idx` belongs to in arbitrary order, if it exists.
     fn get_set_idxs(&self, elem_idx: usize) -> Option<Vec<usize>> {
         let mut curr_idx = elem_idx;
-        let mut curr = self.nodes[curr_idx].borrow();
+        let mut curr = self.nodes.get(curr_idx)?.read();
 
         let mut set_idxs = Vec::with_capacity(self.num_elements());
 
@@ -333,7 +330,7 @@ impl<T: Eq> DisjointSet<T> {
             }
 
             curr_idx = curr.next;
-            curr = self.nodes[curr.next].borrow();
+            curr = self.nodes[curr.next].read();
         }
 
         set_idxs.shrink_to_fit();
@@ -447,9 +444,8 @@ impl<T: Eq> From<DisjointSet<T>> for Vec<Vec<T>> {
             .take(all_sets_idxs.len())
             .collect();
 
-        for (i, node) in ds.nodes.into_iter().enumerate() {
-            vec_2d[all_sets_idxs.iter().position(|v| v.contains(&i)).unwrap()]
-                .push(node.into_inner().elem);
+        for (i, elem) in ds.elems.into_iter().enumerate() {
+            vec_2d[all_sets_idxs.iter().position(|v| v.contains(&i)).unwrap()].push(elem);
         }
 
         vec_2d
@@ -461,17 +457,15 @@ impl<T: Eq> From<DisjointSet<T>> for Vec<Vec<T>> {
 // a more efficient way to accomplish this conversion
 // if T: Default.
 impl<T: Eq + Default> From<DisjointSet<T>> for Vec<Vec<T>> {
-    fn from(ds: DisjointSet<T>) -> Self {
-        ds.roots
-            .iter()
-            .map(|&root| ds.get_set_idxs(root).unwrap())
-            .map(|set_idxs| {
-                set_idxs
-                    .into_iter()
-                    .map(|i| {
-                        // Replace each node with its default to keep everything
-                        // valid while we're iterating. ds is gonna get dropped anyway.
-                        ds.nodes[i].take().elem
+    fn from(mut ds: DisjointSet<T>) -> Self {
+        ds.iter_mut_all_sets()
+            .map(|set_iter| {
+                set_iter
+                    .map(|elem| {
+                        // Replace each element with its default to
+                        // keep everything valid while we're iterating.
+                        // ds is gonna get dropped anyway.
+                        mem::take(elem)
                     })
                     .collect()
             })

@@ -36,13 +36,31 @@ pub struct DisjointSet<T: Eq> {
     nodes: Vec<RwLock<Node>>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Copy)]
 struct Node {
     rank: usize,
     parent_idx: usize,
     // We use this to be able to iterate on each of our subsets.
     // This creates a circular linked list of nodes.
     next: usize,
+}
+
+// The derived Clone impl doesn't override clone_from,
+// so we'll do that here.
+impl Clone for Node {
+    fn clone(&self) -> Self {
+        Self {
+            rank: self.rank,
+            parent_idx: self.parent_idx,
+            next: self.next,
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        self.rank = source.rank;
+        self.parent_idx = source.parent_idx;
+        self.next = source.next;
+    }
 }
 
 impl<T: Eq> DisjointSet<T> {
@@ -336,6 +354,48 @@ impl<T: Eq> DisjointSet<T> {
         set_idxs.shrink_to_fit();
 
         Some(set_idxs)
+    }
+}
+
+impl<T: Eq + Clone> Clone for DisjointSet<T> {
+    fn clone(&self) -> Self {
+        // Node is Copy, so this should be a pretty cheap operation.
+        let copied_nodes = self
+            .nodes
+            .iter()
+            .map(|node_rwlock| RwLock::new(*node_rwlock.read()))
+            .collect();
+
+        Self {
+            roots: self.roots.clone(),
+            elems: self.elems.clone(),
+            nodes: copied_nodes,
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        self.roots.clone_from(&source.roots);
+        self.elems.clone_from(&source.elems);
+
+        self.nodes.resize_with(source.num_elements(), || {
+            // Temporary sentinel value. Node::clone_from should prevent
+            // this from being an unncessary allocation since it'll be
+            // only be mutated, not completely overwritten.
+            RwLock::new(Node {
+                rank: 0,
+                parent_idx: 0,
+                next: 0,
+            })
+        });
+
+        for (source_node, dest_node) in source
+            .nodes
+            .iter()
+            .map(|node_rwlock| node_rwlock.read())
+            .zip(self.nodes.iter_mut())
+        {
+            dest_node.get_mut().clone_from(&source_node);
+        }
     }
 }
 

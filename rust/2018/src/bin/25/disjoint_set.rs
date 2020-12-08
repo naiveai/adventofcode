@@ -28,7 +28,7 @@ use std::{
 /// ```
 // Details about the algorithm used here can be found
 // at the Wikipedia page for "Disjoint-set data structure".
-pub struct DisjointSet<T: Eq> {
+pub struct DisjointSet<T> {
     roots: HashSet<usize>,
     // Each elem idx corresponds to the same idx in nodes
     elems: Vec<T>,
@@ -58,7 +58,7 @@ impl Clone for Node {
     }
 }
 
-impl<T: Eq> DisjointSet<T> {
+impl<T> DisjointSet<T> {
     /// Creates an empty `DisjointSet`.
     pub fn new() -> Self {
         Self {
@@ -75,6 +75,10 @@ impl<T: Eq> DisjointSet<T> {
             nodes: Vec::with_capacity(capacity),
             elems: Vec::with_capacity(capacity),
         }
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.elems.capacity()
     }
 
     /// Returns the number of subsets.
@@ -100,12 +104,18 @@ impl<T: Eq> DisjointSet<T> {
     }
 
     /// Returns true if the given element is present in the `DisjointSet`.
-    pub fn contains(&self, elem: &T) -> bool {
-        self.position(elem).is_some()
+    pub fn contains(&self, elem: &T) -> bool
+    where
+        T: PartialEq,
+    {
+        self.elems.contains(elem)
     }
 
     /// Returns the index of the given element if it exists, or None otherwise.
-    pub fn position(&self, elem: &T) -> Option<usize> {
+    pub fn position(&self, elem: &T) -> Option<usize>
+    where
+        T: PartialEq,
+    {
         self.elems.iter().position(|e| e == elem)
     }
 
@@ -113,7 +123,10 @@ impl<T: Eq> DisjointSet<T> {
     /// Returns an Err with the element's existing index if it was already
     /// present in any subset, otherwise returns an Ok(usize) with the new
     /// index of the element.
-    pub fn make_subset(&mut self, elem: T) -> Result<usize, DuplicateElementsError> {
+    pub fn make_subset(&mut self, elem: T) -> Result<usize, DuplicateElementsError>
+    where
+        T: PartialEq,
+    {
         if let Some(existing_idx) = self.position(&elem) {
             return Err(DuplicateElementsError { existing_idx });
         }
@@ -142,7 +155,10 @@ impl<T: Eq> DisjointSet<T> {
     pub fn add_subset<I: IntoIterator<Item = T>>(
         &mut self,
         iter: I,
-    ) -> Result<usize, NewSubsetError> {
+    ) -> Result<usize, NewSubsetError>
+    where
+        T: PartialEq,
+    {
         let mut prev_idx = None;
 
         for elem in iter {
@@ -294,6 +310,39 @@ impl<T: Eq> DisjointSet<T> {
         Some(true)
     }
 
+    /// Returns Some(true) if the element at `elem_idx` is the only element
+    /// in its subset, or None if it doesn't exist.
+    pub fn is_singleton(&self, elem_idx: usize) -> Option<bool> {
+        Some(self.roots.contains(&elem_idx) && self.nodes.get(elem_idx)?.read().next == elem_idx)
+    }
+
+    /// Removes the elem at `elem_idx` from its current set and into
+    /// a singleton subset with only that element. Returns Some(true) if the
+    /// operation was performed, Some(false) if it didn't need to be,
+    /// or None if the element doesn't exist.
+    pub fn make_singleton(&mut self, elem_idx: usize) -> Option<bool> {
+        if self.is_singleton(elem_idx).contains(&true) {
+            return Some(false);
+        }
+
+        let set_idxs = self.get_set_idxs(elem_idx)?;
+
+        let (&next_idx, &prev_idx) = set_idxs.get(1).zip(set_idxs.last()).unwrap();
+
+        if prev_idx != elem_idx {
+            let mut prev = self.nodes[prev_idx].get_mut();
+            prev.next = next_idx;
+        }
+
+        let mut node = self.nodes[elem_idx].get_mut();
+
+        self.roots.insert(elem_idx);
+        node.parent_idx = elem_idx;
+        node.next = elem_idx;
+
+        Some(true)
+    }
+
     /// Returns the index of the root of the subset
     /// `elem_idx` belongs to, if it exists.
     pub fn find_root_idx(&self, elem_idx: usize) -> Option<usize> {
@@ -329,7 +378,7 @@ impl<T: Eq> DisjointSet<T> {
     }
 
     /// Returns the indexes of all the items in the subset
-    /// `elem_idx` belongs to in arbitrary order, if it exists.
+    /// `elem_idx` belongs to in next-link order, if it exists.
     fn get_set_idxs(&self, elem_idx: usize) -> Option<Vec<usize>> {
         let mut curr_idx = elem_idx;
         let mut curr = self.nodes.get(curr_idx)?.read();
@@ -413,18 +462,18 @@ pub enum NewSubsetError {
     EmptySubset,
 }
 
-pub struct Subset<'a, T: Eq> {
+pub struct Subset<'a, T> {
     ds: &'a DisjointSet<T>,
     set_idxs: Vec<usize>,
 }
 
-impl<'a, T: Eq> Subset<'a, T> {
+impl<'a, T> Subset<'a, T> {
     fn get(&self, index: usize) -> Option<&T> {
         Some(&self.ds[*self.set_idxs.get(index)?])
     }
 }
 
-impl<'a, T: Eq> Index<usize> for Subset<'a, T> {
+impl<'a, T> Index<usize> for Subset<'a, T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -436,7 +485,7 @@ impl<'a, T: Eq> Index<usize> for Subset<'a, T> {
     }
 }
 
-impl<'a, T: Eq> IntoIterator for Subset<'a, T> {
+impl<'a, T> IntoIterator for Subset<'a, T> {
     type Item = &'a T;
     type IntoIter = SubsetIter<'a, T>;
 
@@ -449,13 +498,13 @@ impl<'a, T: Eq> IntoIterator for Subset<'a, T> {
     }
 }
 
-pub struct SubsetIter<'a, T: Eq> {
+pub struct SubsetIter<'a, T> {
     ds: &'a DisjointSet<T>,
     set_idxs: Vec<usize>,
     position: usize,
 }
 
-impl<'a, T: Eq> Iterator for SubsetIter<'a, T> {
+impl<'a, T> Iterator for SubsetIter<'a, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -477,18 +526,18 @@ impl<'a, T: Eq> Iterator for SubsetIter<'a, T> {
     }
 }
 
-impl<'a, T: Eq> ExactSizeIterator for SubsetIter<'a, T> {}
+impl<'a, T> ExactSizeIterator for SubsetIter<'a, T> {}
 
-unsafe impl<'a, T: Eq> TrustedLen for SubsetIter<'a, T> {}
+unsafe impl<'a, T> TrustedLen for SubsetIter<'a, T> {}
 
-impl<'a, T: Eq> FusedIterator for SubsetIter<'a, T> {}
+impl<'a, T> FusedIterator for SubsetIter<'a, T> {}
 
-pub struct SubsetMut<'a, T: Eq> {
+pub struct SubsetMut<'a, T> {
     ds: &'a mut DisjointSet<T>,
     set_idxs: Vec<usize>,
 }
 
-impl<'a, T: Eq> SubsetMut<'a, T> {
+impl<'a, T> SubsetMut<'a, T> {
     fn get(&self, index: usize) -> Option<&T> {
         Some(&self.ds[*self.set_idxs.get(index)?])
     }
@@ -498,7 +547,7 @@ impl<'a, T: Eq> SubsetMut<'a, T> {
     }
 }
 
-impl<'a, T: Eq> Index<usize> for SubsetMut<'a, T> {
+impl<'a, T> Index<usize> for SubsetMut<'a, T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -510,7 +559,7 @@ impl<'a, T: Eq> Index<usize> for SubsetMut<'a, T> {
     }
 }
 
-impl<'a, T: Eq> IndexMut<usize> for SubsetMut<'a, T> {
+impl<'a, T> IndexMut<usize> for SubsetMut<'a, T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         let len = self.set_idxs.len();
 
@@ -521,7 +570,7 @@ impl<'a, T: Eq> IndexMut<usize> for SubsetMut<'a, T> {
     }
 }
 
-impl<'a, T: Eq> IntoIterator for SubsetMut<'a, T> {
+impl<'a, T> IntoIterator for SubsetMut<'a, T> {
     type Item = &'a mut T;
     type IntoIter = SubsetMutIter<'a, T>;
 
@@ -534,13 +583,13 @@ impl<'a, T: Eq> IntoIterator for SubsetMut<'a, T> {
     }
 }
 
-pub struct SubsetMutIter<'a, T: Eq> {
+pub struct SubsetMutIter<'a, T> {
     ds: &'a mut DisjointSet<T>,
     set_idxs: Vec<usize>,
     position: usize,
 }
 
-impl<'a, T: Eq> Iterator for SubsetMutIter<'a, T> {
+impl<'a, T> Iterator for SubsetMutIter<'a, T> {
     type Item = &'a mut T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -567,13 +616,13 @@ impl<'a, T: Eq> Iterator for SubsetMutIter<'a, T> {
     }
 }
 
-impl<'a, T: Eq> ExactSizeIterator for SubsetMutIter<'a, T> {}
+impl<'a, T> ExactSizeIterator for SubsetMutIter<'a, T> {}
 
-unsafe impl<'a, T: Eq> TrustedLen for SubsetMutIter<'a, T> {}
+unsafe impl<'a, T> TrustedLen for SubsetMutIter<'a, T> {}
 
-impl<'a, T: Eq> FusedIterator for SubsetMutIter<'a, T> {}
+impl<'a, T> FusedIterator for SubsetMutIter<'a, T> {}
 
-impl<'a, T: Eq> Extend<T> for SubsetMut<'a, T> {
+impl<'a, T: PartialEq> Extend<T> for SubsetMut<'a, T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         let set_representative = self.set_idxs[0];
 
@@ -600,7 +649,7 @@ impl<'a, T: Eq> Extend<T> for SubsetMut<'a, T> {
     }
 }
 
-impl<T: Eq + fmt::Debug> fmt::Debug for DisjointSet<T> {
+impl<T: fmt::Debug> fmt::Debug for DisjointSet<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -612,13 +661,13 @@ impl<T: Eq + fmt::Debug> fmt::Debug for DisjointSet<T> {
     }
 }
 
-impl<T: Eq> Default for DisjointSet<T> {
+impl<T> Default for DisjointSet<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Eq> Index<usize> for DisjointSet<T> {
+impl<T> Index<usize> for DisjointSet<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -630,7 +679,7 @@ impl<T: Eq> Index<usize> for DisjointSet<T> {
     }
 }
 
-impl<T: Eq> IndexMut<usize> for DisjointSet<T> {
+impl<T> IndexMut<usize> for DisjointSet<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         let len = self.num_elements();
 
@@ -641,7 +690,7 @@ impl<T: Eq> IndexMut<usize> for DisjointSet<T> {
     }
 }
 
-impl<T: Eq> PartialEq for DisjointSet<T> {
+impl<T: PartialEq> PartialEq for DisjointSet<T> {
     fn eq(&self, other: &Self) -> bool {
         if self.num_subsets() != other.num_subsets() || self.num_elements() != other.num_elements()
         {
@@ -668,7 +717,7 @@ impl<T: Eq> PartialEq for DisjointSet<T> {
 
 impl<T: Eq> Eq for DisjointSet<T> {}
 
-impl<T: Eq> Extend<T> for DisjointSet<T> {
+impl<T: PartialEq> Extend<T> for DisjointSet<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         self.add_subset(iter).unwrap();
     }
@@ -683,7 +732,7 @@ impl<T: Eq> Extend<T> for DisjointSet<T> {
     }
 }
 
-impl<T: Eq, I: IntoIterator<Item = T>> FromIterator<I> for DisjointSet<T> {
+impl<T: PartialEq, I: IntoIterator<Item = T>> FromIterator<I> for DisjointSet<T> {
     fn from_iter<II: IntoIterator<Item = I>>(iter: II) -> Self {
         let mut ds = Self::new();
 
@@ -695,8 +744,7 @@ impl<T: Eq, I: IntoIterator<Item = T>> FromIterator<I> for DisjointSet<T> {
                     Some(elem) => elem,
                     None => continue,
                 })
-                .ok()
-                .expect("Attempted to add a duplicate element to a DisjointSet");
+                .unwrap();
 
             ds.get_mut_subset(set_representative)
                 .unwrap()
@@ -707,7 +755,7 @@ impl<T: Eq, I: IntoIterator<Item = T>> FromIterator<I> for DisjointSet<T> {
     }
 }
 
-impl<T: Eq> From<DisjointSet<T>> for Vec<Vec<T>> {
+impl<T> From<DisjointSet<T>> for Vec<Vec<T>> {
     default fn from(ds: DisjointSet<T>) -> Self {
         let all_sets_idxs = ds
             .roots
@@ -731,7 +779,7 @@ impl<T: Eq> From<DisjointSet<T>> for Vec<Vec<T>> {
 // on the crate level. I wanted to do this because there's
 // a more efficient way to accomplish this conversion
 // if T: Default.
-impl<T: Eq + Default> From<DisjointSet<T>> for Vec<Vec<T>> {
+impl<T: Default> From<DisjointSet<T>> for Vec<Vec<T>> {
     fn from(mut ds: DisjointSet<T>) -> Self {
         (&mut ds)
             .into_iter()
@@ -750,7 +798,7 @@ impl<T: Eq + Default> From<DisjointSet<T>> for Vec<Vec<T>> {
     }
 }
 
-impl<T: Eq> IntoIterator for DisjointSet<T> {
+impl<T> IntoIterator for DisjointSet<T> {
     type Item = impl ExactSizeIterator<Item = T> + DoubleEndedIterator;
     type IntoIter = impl ExactSizeIterator<Item = Self::Item> + DoubleEndedIterator;
 
@@ -759,7 +807,7 @@ impl<T: Eq> IntoIterator for DisjointSet<T> {
     }
 }
 
-impl<'a, T: Eq> IntoIterator for &'a DisjointSet<T> {
+impl<'a, T> IntoIterator for &'a DisjointSet<T> {
     type Item = Subset<'a, T>;
     type IntoIter = impl Iterator<Item = Self::Item>;
 
@@ -768,7 +816,7 @@ impl<'a, T: Eq> IntoIterator for &'a DisjointSet<T> {
     }
 }
 
-impl<'a, T: Eq> IntoIterator for &'a mut DisjointSet<T> {
+impl<'a, T> IntoIterator for &'a mut DisjointSet<T> {
     type Item = SubsetMut<'a, T>;
     type IntoIter = impl Iterator<Item = Self::Item>;
 

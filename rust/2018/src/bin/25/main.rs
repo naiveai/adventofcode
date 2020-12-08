@@ -5,7 +5,8 @@
     type_alias_impl_trait,
     extend_one,
     trusted_len,
-    bindings_after_at
+    bindings_after_at,
+    option_result_contains
 )]
 
 mod disjoint_set;
@@ -19,7 +20,7 @@ use num::{
     traits::{AsPrimitive, NumAssignOps},
     Num, Unsigned,
 };
-use std::{convert::TryInto, fmt, fs, iter, slice, str::FromStr};
+use std::{collections::HashMap, convert::TryInto, fmt, fs, iter, slice, str::FromStr};
 
 pub fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("2018-25")
@@ -54,7 +55,7 @@ where
     let mut points_ds = DisjointSet::with_capacity(points.len());
 
     // We map the index of a point in the original list to its index in the DisjointSet.
-    let mut points_set_idxs: Vec<(usize, usize)> = Vec::with_capacity(points.len());
+    let mut points_set_idxs = HashMap::with_capacity(points.len());
 
     for (point_idx, point) in points.iter().copied().enumerate() {
         let point_set_idx = match points_ds.make_subset(point) {
@@ -63,7 +64,7 @@ where
             Err(_) => continue,
         };
 
-        for &(other_point_idx, other_point_set_idx) in points_set_idxs.iter() {
+        for (&other_point_idx, &other_point_set_idx) in points_set_idxs.iter() {
             let other_point = &points[other_point_idx];
 
             if point.manhattan_distance(other_point) <= chain_distance {
@@ -71,7 +72,7 @@ where
             }
         }
 
-        points_set_idxs.push((point_idx, point_set_idx));
+        points_set_idxs.insert(point_idx, point_set_idx);
     }
 
     points_ds

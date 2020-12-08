@@ -641,6 +641,33 @@ impl<T: Eq> IndexMut<usize> for DisjointSet<T> {
     }
 }
 
+impl<T: Eq> PartialEq for DisjointSet<T> {
+    fn eq(&self, other: &Self) -> bool {
+        if self.num_subsets() != other.num_subsets() || self.num_elements() != other.num_elements()
+        {
+            return false;
+        }
+
+        for (self_subset, other_subset) in self.into_iter().zip(other.into_iter()) {
+            let mut other_subset = other_subset.into_iter();
+
+            for elem in self_subset {
+                if let Some(other_elem) = other_subset.next() {
+                    if elem != other_elem {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+}
+
+impl<T: Eq> Eq for DisjointSet<T> {}
+
 impl<T: Eq> Extend<T> for DisjointSet<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         self.add_subset(iter).unwrap();

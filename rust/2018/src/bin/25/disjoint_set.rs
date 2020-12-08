@@ -1,9 +1,8 @@
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use std::{
     collections::HashSet,
-    convert::TryFrom,
     fmt,
-    iter::{self, ExactSizeIterator},
+    iter::{self, ExactSizeIterator, Extend, FromIterator, FusedIterator, TrustedLen},
     mem,
     ops::{Index, IndexMut},
 };
@@ -15,8 +14,8 @@ use std::{
 /// ```
 /// let mut ds = DisjointSet::new();
 ///
-/// let a = ds.make_set(1).unwrap();
-/// let b = ds.make_set(2).unwrap();
+/// let a = ds.make_subset(1).unwrap();
+/// let b = ds.make_subset(2).unwrap();
 ///
 /// assert!(ds.contains(&1) && ds.contains(&2));
 /// assert_eq!(ds.same_set(a, b), Some(false));
@@ -49,11 +48,7 @@ struct Node {
 // so we'll do that here.
 impl Clone for Node {
     fn clone(&self) -> Self {
-        Self {
-            rank: self.rank,
-            parent_idx: self.parent_idx,
-            next: self.next,
-        }
+        *self
     }
 
     fn clone_from(&mut self, source: &Self) {
@@ -83,13 +78,25 @@ impl<T: Eq> DisjointSet<T> {
     }
 
     /// Returns the number of subsets.
-    pub fn num_sets(&self) -> usize {
+    pub fn num_subsets(&self) -> usize {
         self.roots.len()
     }
 
     /// Returns the number of total elements in all subsets.
     pub fn num_elements(&self) -> usize {
         self.elems.len()
+    }
+
+    // Returns true if the `DisjointSet` is empty
+    pub fn is_empty(&self) -> bool {
+        self.num_elements() == 0
+    }
+
+    /// Clears the `DisjointSet` of all elements.
+    pub fn clear(&mut self) {
+        self.roots.clear();
+        self.elems.clear();
+        self.nodes.clear();
     }
 
     /// Returns true if the given element is present in the `DisjointSet`.
@@ -102,30 +109,55 @@ impl<T: Eq> DisjointSet<T> {
         self.elems.iter().position(|e| e == elem)
     }
 
-    /// Adds a new set with a single, given element to
-    /// the `DisjointSet`. Returns an Err with the elem
-    /// if it was already present in any set, otherwise
-    /// returns a Ok(usize) with the index of the element.
-    pub fn make_set(&mut self, elem: T) -> Result<usize, T> {
-        if !self.contains(&elem) {
-            // This is the index where the node will be inserted,
-            // thanks to the magic of zero-indexing.
-            let insertion_idx = self.elems.len();
-
-            self.elems.push(elem);
-
-            self.nodes.push(RwLock::new(Node {
-                rank: 0,
-                parent_idx: insertion_idx,
-                next: insertion_idx,
-            }));
-
-            self.roots.insert(insertion_idx);
-
-            Ok(insertion_idx)
-        } else {
-            Err(elem)
+    /// Adds a new subset with a single, given element to the `DisjointSet`.
+    /// Returns an Err with the element's existing index if it was already
+    /// present in any subset, otherwise returns an Ok(usize) with the new
+    /// index of the element.
+    pub fn make_subset(&mut self, elem: T) -> Result<usize, DuplicateElementsError> {
+        if let Some(existing_idx) = self.position(&elem) {
+            return Err(DuplicateElementsError { existing_idx });
         }
+
+        // This is the index where the node will be inserted,
+        // thanks to the magic of zero-indexing.
+        let insertion_idx = self.elems.len();
+
+        self.elems.push(elem);
+
+        self.nodes.push(RwLock::new(Node {
+            rank: 0,
+            parent_idx: insertion_idx,
+            next: insertion_idx,
+        }));
+
+        self.roots.insert(insertion_idx);
+
+        Ok(insertion_idx)
+    }
+
+    /// Add a new subset with elements from an iterator. Returns an index
+    /// that serves as this subset's representative, or an Err if there were
+    /// elements in the iterator that were already present in the DisjointSet,
+    /// or the iteratoe was empty.
+    pub fn add_subset<I: IntoIterator<Item = T>>(
+        &mut self,
+        iter: I,
+    ) -> Result<usize, NewSubsetError> {
+        let mut prev_idx = None;
+
+        for elem in iter {
+            let insertion_idx = self.make_subset(elem)?;
+
+            if let Some(prev) = prev_idx {
+                self.union(prev, insertion_idx);
+            }
+
+            prev_idx = Some(insertion_idx);
+        }
+
+        Ok(self
+            .find_root_idx(prev_idx.ok_or(NewSubsetError::EmptySubset)?)
+            .unwrap())
     }
 
     /// If present, returns an immutable reference to the element at `elem_idx`.
@@ -138,94 +170,54 @@ impl<T: Eq> DisjointSet<T> {
         self.elems.get_mut(elem_idx)
     }
 
-    /// Returns an `&T` iterator over all elements in the set
+    /// Returns an `&T` iterator over all elements in the subset
     /// elem_idx belongs to, if it exists.
-    // We use both applicable Iterator types here to give the caller
-    // the maximum possible flexbility when using the returned value.
-    pub fn iter_set(
-        &self,
-        elem_idx: usize,
-    ) -> Option<impl ExactSizeIterator<Item = &T> + DoubleEndedIterator> {
-        Some(
-            self.get_set_idxs(elem_idx)?
-                .into_iter()
-                .map(move |i| self.get(i).unwrap()),
-        )
+    pub fn get_subset(&self, elem_idx: usize) -> Option<Subset<T>> {
+        Some(Subset {
+            ds: self,
+            set_idxs: self.get_set_idxs(elem_idx)?,
+        })
     }
 
-    /// Returns an `&mut T` iterator over all elements in the set
-    /// elem_idx belongs to, if it exists.
-    pub fn iter_mut_set(
-        &mut self,
-        elem_idx: usize,
-    ) -> Option<impl ExactSizeIterator<Item = &mut T> + DoubleEndedIterator> {
+    /// Returns an `&mut T` iterator over all elements in the subset
+    /// elem_idx belongs to, if it exists. This iterator implements
+    /// [`Extend<T>`](core::iter::Extend), so you can add elements
+    /// from another iterator to this subset using it.
+    pub fn get_mut_subset(&mut self, elem_idx: usize) -> Option<SubsetMut<T>> {
         let set_idxs = self.get_set_idxs(elem_idx)?;
 
-        Some(set_idxs.into_iter().map(move |i| {
-            // SAFETY: We're in a &mut self context, so
-            // the current thread has exclusive access,
-            // and there are no duplicate indexes in the set.
-            unsafe { &mut *(self.get_mut(i).unwrap() as *mut _) }
-        }))
+        Some(SubsetMut { ds: self, set_idxs })
     }
 
     /// Returns an second-order iterator of `&T` of all the subsets.
-    pub fn iter_all_sets(
-        &self,
-    ) -> impl ExactSizeIterator<Item = impl ExactSizeIterator<Item = &T> + DoubleEndedIterator>
-           + DoubleEndedIterator {
-        let roots = self.roots.clone();
-
-        roots
-            .iter()
-            .map(|&r| self.iter_set(r).unwrap())
-            // Use Vec to satisfy DoubleEndedIterator
-            .collect::<Vec<_>>()
-            .into_iter()
+    pub fn get_all_subsets(&self) -> impl IntoIterator<Item = Subset<T>> {
+        self.roots.iter().map(move |&r| self.get_subset(r).unwrap())
     }
 
     /// Returns a second-order iterator of `&mut T` of all the subsets.
-    pub fn iter_mut_all_sets(
-        &mut self,
-    ) -> impl ExactSizeIterator<Item = impl ExactSizeIterator<Item = &mut T> + DoubleEndedIterator>
-           + DoubleEndedIterator {
-        // This function can't be as simple as iter_all_sets,
-        // because Rust won't like it if we just straight up take
-        // &mut self several times over.
+    pub fn get_mut_all_subsets(&mut self) -> impl IntoIterator<Item = SubsetMut<T>> {
+        // Clone to avoid violating aliasing rules
         let roots = self.roots.clone();
 
-        roots
-            .iter()
-            .map(|&root| {
-                self.get_set_idxs(root)
-                    .unwrap()
-                    .into_iter()
-                    .map(|i| {
-                        // SAFETY: We're in a &mut self context,
-                        // so the current thread has exclusive access,
-                        // and there are no duplicate indexes in each set
-                        // or among sets.
-                        unsafe { &mut *(self.get_mut(i).unwrap() as *mut _) }
-                    })
-                    .collect::<Vec<_>>()
-            })
-            // In order to avoid the closures that borrow
-            // self outliving the function itself, we collect
-            // their results and then turn them back into iterators.
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|v| v.into_iter())
+        roots.into_iter().map(move |root| {
+            // SAFETY: Here we reborrow self, which has the lifetime of this
+            // closure (&'1 mut self) as an &'a mut self, which is valid here because
+            // there are no overlapping indexes in each subset or among subsets.
+            unsafe { &mut *(self as *mut Self) }
+                .get_mut_subset(root)
+                .unwrap()
+        })
     }
 
     /// Returns Some(true) if the elements at both the given indexes
-    /// are in the same set, or None of either of them aren't present altogether.
+    /// are in the same subset, or None of either of them aren't present altogether.
     pub fn same_set(&self, elem1_idx: usize, elem2_idx: usize) -> Option<bool> {
         // The ? ensures this'll short-circuit and return None if either of the indexes are None,
         // meaning we don't end up returning Some(true) if both elements don't exist.
         Some(self.find_root_idx(elem1_idx)? == self.find_root_idx(elem2_idx)?)
     }
 
-    /// Performs a union for the two sets containing the given elements.
+    /// Performs a union for the two subsets containing the given elements.
     /// Returns Some(true) if the operation was performed, Some(false) if not,
     /// and None if either element doesn't exist.
     ///
@@ -234,11 +226,11 @@ impl<T: Eq> DisjointSet<T> {
     /// let mut ds = DisjointSet::new();
     ///
     /// // Ommitted: adding 5 seperate elements to the set a..e
-    /// # let a = ds.make_set(1).unwrap();
-    /// # let b = ds.make_set(2).unwrap();
-    /// # let c = ds.make_set(3).unwrap();
-    /// # let d = ds.make_set(4).unwrap();
-    /// # let e = ds.make_set(5).unwrap();
+    /// # let a = ds.make_subset(1).unwrap();
+    /// # let b = ds.make_subset(2).unwrap();
+    /// # let c = ds.make_subset(3).unwrap();
+    /// # let d = ds.make_subset(4).unwrap();
+    /// # let e = ds.make_subset(5).unwrap();
     ///
     /// assert_eq!(ds.union(a, b), Some(true));
     ///
@@ -265,17 +257,21 @@ impl<T: Eq> DisjointSet<T> {
             self.find_root_idx(elem_y_idx)?,
         );
 
-        // We don't have to do anything if this is the case.
-        // Also, if we didn't check this, we'd block forever below because
-        // we'd attempt to obtain two mutable locks of the same RwLock.
+        // We don't have to do anything if this is the case. If we
+        // didn't check this, we'd cause UB below by attempting
+        // two mutable borrows of the same element.
         if x_root_idx == y_root_idx {
             return Some(false);
         }
 
-        let (mut x_root, mut y_root) = (
-            self.nodes[x_root_idx].write(),
-            self.nodes[y_root_idx].write(),
-        );
+        let x_root: *mut _ = &mut self.nodes[x_root_idx];
+        let y_root: *mut _ = &mut self.nodes[y_root_idx];
+
+        // We could just use RwLock::write here and avoid the need
+        // for unsafe, but since we're in a &mut self context,
+        // we can just ignore RwLock's overhead.
+        let (mut x_root, mut y_root) =
+            unsafe { ((&mut *x_root).get_mut(), (&mut *y_root).get_mut()) };
 
         if x_root.rank < y_root.rank {
             // Must use mem::swap here. If we shadowed,
@@ -312,13 +308,17 @@ impl<T: Eq> DisjointSet<T> {
             let parent_idx = curr.parent_idx;
             let parent = self.nodes[parent_idx].upgradable_read();
 
+            // We only need a write lock for this next step.
+            let mut curr_mut = RwLockUpgradableReadGuard::upgrade(curr);
+
             // Set the current node's parent to its grandparent.
             // This is called *path splitting*: (see the Wikipedia
             // page for details) a simpler to implement, one-pass
             // version of path compression that also, apparently,
             // turns out to be more efficient in practice.
-            let mut mut_curr = parking_lot::RwLockUpgradableReadGuard::upgrade(curr);
-            mut_curr.parent_idx = parent.parent_idx;
+            curr_mut.parent_idx = parent.parent_idx;
+
+            drop(curr_mut);
 
             // Move up a level for the next iteration
             curr_idx = parent_idx;
@@ -334,7 +334,7 @@ impl<T: Eq> DisjointSet<T> {
         let mut curr_idx = elem_idx;
         let mut curr = self.nodes.get(curr_idx)?.read();
 
-        let mut set_idxs = Vec::with_capacity(self.num_elements());
+        let mut set_idxs = Vec::with_capacity(curr.rank);
 
         // We can't check the condition up here using while because
         // that would make it so the last node is never pushed.
@@ -399,9 +399,216 @@ impl<T: Eq + Clone> Clone for DisjointSet<T> {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+#[error("Attempted to add a duplicate element to a DisjointSet: already existed at {existing_idx}")]
+pub struct DuplicateElementsError {
+    existing_idx: usize,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum NewSubsetError {
+    #[error(transparent)]
+    DuplicateElement(#[from] DuplicateElementsError),
+    #[error("Subsets must contain at least one element")]
+    EmptySubset,
+}
+
+pub struct Subset<'a, T: Eq> {
+    ds: &'a DisjointSet<T>,
+    set_idxs: Vec<usize>,
+}
+
+impl<'a, T: Eq> Subset<'a, T> {
+    fn get(&self, index: usize) -> Option<&T> {
+        Some(&self.ds[*self.set_idxs.get(index)?])
+    }
+}
+
+impl<'a, T: Eq> Index<usize> for Subset<'a, T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        self.get(index).expect(&format!(
+            "Invalid index: the len is {} but the index is {}",
+            self.set_idxs.len(),
+            index
+        ))
+    }
+}
+
+impl<'a, T: Eq> IntoIterator for Subset<'a, T> {
+    type Item = &'a T;
+    type IntoIter = SubsetIter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        SubsetIter {
+            ds: self.ds,
+            set_idxs: self.set_idxs,
+            position: 0,
+        }
+    }
+}
+
+pub struct SubsetIter<'a, T: Eq> {
+    ds: &'a DisjointSet<T>,
+    set_idxs: Vec<usize>,
+    position: usize,
+}
+
+impl<'a, T: Eq> Iterator for SubsetIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.position >= self.set_idxs.len() {
+            return None;
+        }
+
+        let next = self.ds.get(self.set_idxs[self.position]).unwrap();
+
+        self.position += 1;
+
+        Some(next)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.set_idxs.len();
+
+        (len, Some(len))
+    }
+}
+
+impl<'a, T: Eq> ExactSizeIterator for SubsetIter<'a, T> {}
+
+unsafe impl<'a, T: Eq> TrustedLen for SubsetIter<'a, T> {}
+
+impl<'a, T: Eq> FusedIterator for SubsetIter<'a, T> {}
+
+pub struct SubsetMut<'a, T: Eq> {
+    ds: &'a mut DisjointSet<T>,
+    set_idxs: Vec<usize>,
+}
+
+impl<'a, T: Eq> SubsetMut<'a, T> {
+    fn get(&self, index: usize) -> Option<&T> {
+        Some(&self.ds[*self.set_idxs.get(index)?])
+    }
+
+    fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        Some(&mut self.ds[*self.set_idxs.get(index)?])
+    }
+}
+
+impl<'a, T: Eq> Index<usize> for SubsetMut<'a, T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        self.get(index).expect(&format!(
+            "Invalid index: the len is {} but the index is {}",
+            self.set_idxs.len(),
+            index
+        ))
+    }
+}
+
+impl<'a, T: Eq> IndexMut<usize> for SubsetMut<'a, T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        let len = self.set_idxs.len();
+
+        self.get_mut(index).expect(&format!(
+            "Invalid index: the len is {} but the index is {}",
+            len, index
+        ))
+    }
+}
+
+impl<'a, T: Eq> IntoIterator for SubsetMut<'a, T> {
+    type Item = &'a mut T;
+    type IntoIter = SubsetMutIter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        SubsetMutIter {
+            ds: self.ds,
+            set_idxs: self.set_idxs,
+            position: 0,
+        }
+    }
+}
+
+pub struct SubsetMutIter<'a, T: Eq> {
+    ds: &'a mut DisjointSet<T>,
+    set_idxs: Vec<usize>,
+    position: usize,
+}
+
+impl<'a, T: Eq> Iterator for SubsetMutIter<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.position >= self.set_idxs.len() {
+            return None;
+        }
+
+        let next = unsafe {
+            // SAFETY: We're in a &mut DisjointSet context, so the current
+            // thread has exclusive access, and there are no duplicate
+            // indexes in the set.
+            &mut *(self.ds.get_mut(self.set_idxs[self.position]).unwrap() as *mut _)
+        };
+
+        self.position += 1;
+
+        Some(next)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.set_idxs.len();
+
+        (len, Some(len))
+    }
+}
+
+impl<'a, T: Eq> ExactSizeIterator for SubsetMutIter<'a, T> {}
+
+unsafe impl<'a, T: Eq> TrustedLen for SubsetMutIter<'a, T> {}
+
+impl<'a, T: Eq> FusedIterator for SubsetMutIter<'a, T> {}
+
+impl<'a, T: Eq> Extend<T> for SubsetMut<'a, T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        let set_representative = self.set_idxs[0];
+
+        for elem in iter {
+            let insertion_idx = match self.ds.make_subset(elem) {
+                Ok(idx) => idx,
+                Err(e @ DuplicateElementsError { existing_idx }) => {
+                    if self.set_idxs.contains(&existing_idx) {
+                        // Already contained in the current set, ignore.
+                        continue;
+                    } else {
+                        panic!("{}. Use DisjointSet::union to merge two subsets.", e);
+                    }
+                }
+            };
+
+            self.set_idxs.push(insertion_idx);
+            self.ds.union(set_representative, insertion_idx);
+        }
+    }
+
+    fn extend_reserve(&mut self, additional: usize) {
+        self.ds.extend_reserve(additional);
+    }
+}
+
 impl<T: Eq + fmt::Debug> fmt::Debug for DisjointSet<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", <Vec<Vec<_>>>::from(self))
+        write!(
+            f,
+            "{:?}",
+            self.into_iter()
+                .map(|subset| subset.into_iter().collect::<Vec<_>>())
+                .collect::<Vec<_>>()
+        )
     }
 }
 
@@ -415,13 +622,11 @@ impl<T: Eq> Index<usize> for DisjointSet<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
-        self.get(index).unwrap_or_else(|| {
-            panic!(
-                "index out of bounds: the len is {} but the index is {}",
-                self.num_elements(),
-                index
-            )
-        })
+        self.get(index).expect(&format!(
+            "index out of bounds: the len is {} but the index is {}",
+            self.num_elements(),
+            index
+        ))
     }
 }
 
@@ -436,60 +641,43 @@ impl<T: Eq> IndexMut<usize> for DisjointSet<T> {
     }
 }
 
-impl<T: Eq> TryFrom<Vec<T>> for DisjointSet<T> {
-    type Error = TryFromVecError;
+impl<T: Eq> Extend<T> for DisjointSet<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        self.add_subset(iter).unwrap();
+    }
 
-    fn try_from(vec: Vec<T>) -> Result<Self, Self::Error> {
-        use TryFromVecError::*;
+    fn extend_one(&mut self, item: T) {
+        self.make_subset(item).unwrap();
+    }
 
-        let mut ds = Self::with_capacity(vec.len());
-
-        for elem in vec {
-            ds.make_set(elem).map_err(|_| DuplicateElements)?;
-        }
-
-        Ok(ds)
+    fn extend_reserve(&mut self, additional: usize) {
+        self.elems.extend_reserve(additional);
+        self.nodes.extend_reserve(additional);
     }
 }
 
-impl<T: Eq> TryFrom<Vec<Vec<T>>> for DisjointSet<T> {
-    type Error = TryFromVecError;
+impl<T: Eq, I: IntoIterator<Item = T>> FromIterator<I> for DisjointSet<T> {
+    fn from_iter<II: IntoIterator<Item = I>>(iter: II) -> Self {
+        let mut ds = Self::new();
 
-    fn try_from(mut vec_2d: Vec<Vec<T>>) -> Result<Self, Self::Error> {
-        use TryFromVecError::*;
+        for subset in iter {
+            let mut subset = subset.into_iter();
 
-        let mut ds = Self::with_capacity(vec_2d.iter().map(|v| v.len()).sum());
+            let set_representative = ds
+                .make_subset(match subset.next() {
+                    Some(elem) => elem,
+                    None => continue,
+                })
+                .ok()
+                .expect("Attempted to add a duplicate element to a DisjointSet");
 
-        let mut ds_indexes = Vec::with_capacity(vec_2d.len());
-
-        for vec in &mut vec_2d {
-            if vec.is_empty() {
-                continue;
-            }
-
-            ds_indexes.push(
-                ds.make_set(vec.swap_remove(0))
-                    .map_err(|_| DuplicateElements)?,
-            );
+            ds.get_mut_subset(set_representative)
+                .unwrap()
+                .extend(subset);
         }
 
-        for (i, vec) in vec_2d.into_iter().enumerate() {
-            for elem in vec {
-                let elem_idx = ds.make_set(elem).map_err(|_| DuplicateElements)?;
-
-                // Add the element to its corresponding set
-                ds.union(ds_indexes[i], elem_idx);
-            }
-        }
-
-        Ok(ds)
+        ds
     }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum TryFromVecError {
-    #[error("Two duplicate elements were found.")]
-    DuplicateElements,
 }
 
 impl<T: Eq> From<DisjointSet<T>> for Vec<Vec<T>> {
@@ -518,9 +706,11 @@ impl<T: Eq> From<DisjointSet<T>> for Vec<Vec<T>> {
 // if T: Default.
 impl<T: Eq + Default> From<DisjointSet<T>> for Vec<Vec<T>> {
     fn from(mut ds: DisjointSet<T>) -> Self {
-        ds.iter_mut_all_sets()
+        (&mut ds)
+            .into_iter()
             .map(|set_iter| {
                 set_iter
+                    .into_iter()
                     .map(|elem| {
                         // Replace each element with its default to
                         // keep everything valid while we're iterating.
@@ -533,23 +723,29 @@ impl<T: Eq + Default> From<DisjointSet<T>> for Vec<Vec<T>> {
     }
 }
 
-impl<'a, T: Eq> From<&'a DisjointSet<T>> for Vec<Vec<&'a T>> {
-    fn from(ds: &'a DisjointSet<T>) -> Self {
-        ds.iter_all_sets().map(|i| i.collect()).collect()
-    }
-}
-
-impl<'a, T: Eq> From<&'a mut DisjointSet<T>> for Vec<Vec<&'a mut T>> {
-    fn from(ds: &'a mut DisjointSet<T>) -> Self {
-        ds.iter_mut_all_sets().map(|i| i.collect()).collect()
-    }
-}
-
 impl<T: Eq> IntoIterator for DisjointSet<T> {
     type Item = impl ExactSizeIterator<Item = T> + DoubleEndedIterator;
     type IntoIter = impl ExactSizeIterator<Item = Self::Item> + DoubleEndedIterator;
 
     fn into_iter(self) -> Self::IntoIter {
-        <Vec<Vec<T>>>::from(self).into_iter().map(|v| v.into_iter())
+        <Vec<Vec<_>>>::from(self).into_iter().map(|v| v.into_iter())
+    }
+}
+
+impl<'a, T: Eq> IntoIterator for &'a DisjointSet<T> {
+    type Item = Subset<'a, T>;
+    type IntoIter = impl Iterator<Item = Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.get_all_subsets().into_iter()
+    }
+}
+
+impl<'a, T: Eq> IntoIterator for &'a mut DisjointSet<T> {
+    type Item = SubsetMut<'a, T>;
+    type IntoIter = impl Iterator<Item = Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.get_mut_all_subsets().into_iter()
     }
 }

@@ -1,5 +1,12 @@
 #![allow(incomplete_features)]
-#![feature(min_const_generics, specialization, type_alias_impl_trait)]
+#![feature(
+    min_const_generics,
+    specialization,
+    type_alias_impl_trait,
+    extend_one,
+    trusted_len,
+    bindings_after_at
+)]
 
 mod disjoint_set;
 
@@ -26,7 +33,10 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     let points_ds = find_chains(&points, 3u8);
 
-    println!("The number of constellations is {}", points_ds.num_sets());
+    println!(
+        "The number of constellations is {}",
+        points_ds.num_subsets()
+    );
 
     Ok(())
 }
@@ -47,7 +57,7 @@ where
     let mut points_set_idxs: Vec<(usize, usize)> = Vec::with_capacity(points.len());
 
     for (point_idx, point) in points.iter().copied().enumerate() {
-        let point_set_idx = match points_ds.make_set(point) {
+        let point_set_idx = match points_ds.make_subset(point) {
             Ok(i) => i,
             // This means there are duplicate points, which we can ignore.
             Err(_) => continue,

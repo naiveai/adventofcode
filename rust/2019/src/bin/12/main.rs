@@ -1,6 +1,6 @@
 #![feature(default_free_fn)]
 
-use anyhow::{anyhow, bail};
+use anyhow::{bail, Context};
 use clap::{App, Arg};
 use derive_more::{Add, AddAssign, From, SubAssign};
 use itertools::Itertools;
@@ -10,7 +10,7 @@ fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("2019-5")
         .arg(Arg::from_usage("[input] 'Problem input file'").default_value("input.txt"))
         .arg(
-            Arg::from_usage("[num_steps] -n --num-steps 'Number of steps to simulate for'")
+            Arg::from_usage("[required_steps] -n --num-steps 'Number of steps to simulate for'")
                 .default_value("1000"),
         )
         .get_matches();
@@ -20,37 +20,96 @@ fn main() -> Result<(), anyhow::Error> {
     let positions_str = fs::read_to_string(input_filename)?.replace("\r\n", "\n");
     let positions = parse_input(&positions_str)?;
 
-    let mut planets = positions
+    let input_planets = positions
         .into_iter()
         .map(|pos| (pos, default()))
         .collect_vec();
 
-    let num_steps = matches
-        .value_of("num_steps")
+    let required_steps = matches
+        .value_of("required_steps")
         .and_then(|n_str| n_str.parse::<usize>().ok())
-        .ok_or_else(|| anyhow!("Number of steps provided couldn't be parsed as a positive number"))?;
+        .context("Number of steps provided couldn't be parsed as a positive number")?;
 
-    for _ in 1..=num_steps {
+    let mut planets = input_planets.clone();
+    let mut num_steps = 0_usize;
+    let (mut x_loop, mut y_loop, mut z_loop) = (None, None, None);
+
+    loop {
+        num_steps += 1;
         planets = simulate_step(planets);
+
+        if num_steps == required_steps {
+            let total_energy = planets
+                .iter()
+                .map(|(pos, vel)| {
+                    ((pos.x.abs() + pos.y.abs() + pos.z.abs())
+                        * (vel.x.abs() + vel.y.abs() + vel.z.abs())) as usize
+                })
+                .sum::<usize>();
+
+            println!(
+                "Total energy after {} steps: {}",
+                required_steps, total_energy
+            );
+        }
+
+        let mut zipped_iter = input_planets.iter().zip(planets.iter());
+
+        // The three coordinates don't affect each other, so we find the points
+        // at which each of them individually loops around and then find their LCM.
+
+        if x_loop.is_none()
+            && zipped_iter
+                .clone()
+                .all(|((ipos, ivel), (pos, vel))| ipos.x == pos.x && ivel.x == vel.x)
+        {
+            x_loop = Some(num_steps);
+        }
+
+        if y_loop.is_none()
+            && zipped_iter
+                .clone()
+                .all(|((ipos, ivel), (pos, vel))| ipos.y == pos.y && ivel.y == vel.y)
+        {
+            y_loop = Some(num_steps);
+        }
+
+        if z_loop.is_none()
+            && zipped_iter.all(|((ipos, ivel), (pos, vel))| ipos.z == pos.z && ivel.z == vel.z)
+        {
+            z_loop = Some(num_steps);
+        }
+
+        if x_loop.is_some() && y_loop.is_some() && z_loop.is_some() {
+            break;
+        }
     }
 
-    let total_energy = planets
-        .iter()
-        .map(|(pos, vel)| {
-            ((pos.x.abs() + pos.y.abs() + pos.z.abs()) * (vel.x.abs() + vel.y.abs() + vel.z.abs()))
-                as usize
-        })
-        .sum::<usize>();
+    let (x_loop, y_loop, z_loop) = (x_loop.unwrap(), y_loop.unwrap(), z_loop.unwrap());
 
-    println!("Total energy after {} steps: {}", num_steps, total_energy);
+    let lcm =
+        x_loop * y_loop * z_loop / gcd(y_loop * z_loop, gcd(z_loop * x_loop, x_loop * y_loop));
+
+    println!("Number of steps until the universe loops around: {}", lcm);
 
     Ok(())
+}
+
+// See https://en.wikipedia.org/wiki/Greatest_common_divisor#Euclid%27s_algorithm
+fn gcd(a: usize, b: usize) -> usize {
+    if a == 0 {
+        b
+    } else if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
 }
 
 type Planet = (Coords3D, Coords3D);
 
 fn simulate_step(mut planets: Vec<Planet>) -> Vec<Planet> {
-    let mut velocity_deltas= vec![default(); planets.len()];
+    let mut velocity_deltas = vec![default(); planets.len()];
 
     for ((a_idx, (a_pos, _)), (b_idx, (b_pos, _))) in
         planets.iter().enumerate().tuple_combinations()

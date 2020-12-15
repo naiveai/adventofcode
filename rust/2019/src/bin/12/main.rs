@@ -7,7 +7,7 @@ use itertools::Itertools;
 use std::{cmp::Ordering, default::default, fmt, fs};
 
 fn main() -> Result<(), anyhow::Error> {
-    let matches = App::new("2019-5")
+    let matches = App::new("2019-12")
         .arg(Arg::from_usage("[input] 'Problem input file'").default_value("input.txt"))
         .arg(
             Arg::from_usage("[required_steps] -n --num-steps 'Number of steps to simulate for'")

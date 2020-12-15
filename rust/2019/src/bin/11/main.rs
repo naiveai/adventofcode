@@ -12,7 +12,7 @@ use tokio::{
 };
 
 fn main() -> Result<(), anyhow::Error> {
-    let matches = App::new("2019-5")
+    let matches = App::new("2019-11")
         .arg(Arg::from_usage("[input] 'Problem input file'").default_value("input.txt"))
         .get_matches();
 

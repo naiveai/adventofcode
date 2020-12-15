@@ -57,7 +57,7 @@ fn main() -> Result<(), anyhow::Error> {
         println!("{}", info);
     }));
 
-    let matches = App::new("2019-5")
+    let matches = App::new("2019-13")
         .arg(Arg::from_usage("[input] 'Problem input file'").default_value("input.txt"))
         .arg(Arg::from_usage("[draw_intermediate] -d --draw-intermediate 'Draw the screen while the game is running'").takes_value(false))
         .arg(Arg::from_usage("[draw_fast] -f --draw-fast 'Speed the game up while drawing it'").takes_value(false))

@@ -4,11 +4,8 @@ use digits_iterator::*;
 use itertools::Itertools;
 use rayon::prelude::*;
 use std::{cmp, convert::TryFrom, fs};
-use tokio::{
-    pin,
-    stream::{self, Stream, StreamExt},
-    task,
-};
+use tokio::{pin, task};
+use tokio_stream::{Stream, StreamExt};
 
 fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("2019-7")
@@ -97,7 +94,7 @@ async fn run_amplifiers(
 
         task::spawn(run_program(
             program,
-            stream::once(current_phase_setting as isize).chain(input_rx.into_stream()),
+            tokio_stream::once(current_phase_setting as isize).chain(input_rx.into_stream()),
             move |output| {
                 if !disconnected_tx {
                     if output_tx.send(output).is_err() {

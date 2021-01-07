@@ -13,12 +13,13 @@ derive_more = "0.99"
 digits_iterator = "0.1"
 multimap = "0.8"
 futures-executor = "0.3"
-tokio = { version = "0.3", features = ["rt", "stream", "macros"] }
-flume = "0.9"
+tokio = { version = "1.0", features = ["rt", "macros"] }
+tokio-stream = "0.1"
+flume = "0.10"
 ordered-float = "2.0"
 rayon = "1.5"
 colored = "2"
-crossterm = "0.18"
+crossterm = "0.19"
 ctrlc = { version = "3.1", features = ["termination"] }
 atomic = "0.5"
 parking_lot = "0.11"

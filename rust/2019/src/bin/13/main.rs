@@ -27,10 +27,8 @@ use std::{
     thread,
     time::Duration,
 };
-use tokio::{
-    pin,
-    stream::{self, Stream, StreamExt},
-};
+use tokio::pin;
+use tokio_stream::{Stream, StreamExt};
 
 fn main() -> Result<(), anyhow::Error> {
     // Because we're doing fancy terminal stuff here, we should
@@ -156,7 +154,7 @@ fn run_game(
 
     futures_executor::block_on(run_program(
         game_program,
-        stream::iter(iter::from_fn(|| {
+        tokio_stream::iter(iter::from_fn(|| {
             if let Some(pause_duration) = should_draw {
                 let screen_str = screen_to_string(&screen.lock());
                 let current_score = current_score_input.as_ref().unwrap().load(Acquire);

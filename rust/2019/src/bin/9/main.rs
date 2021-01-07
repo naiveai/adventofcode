@@ -3,10 +3,8 @@ use clap::{App, Arg};
 use digits_iterator::*;
 use itertools::Itertools;
 use std::{convert::TryFrom, fs};
-use tokio::{
-    pin,
-    stream::{self, Stream, StreamExt},
-};
+use tokio::pin;
+use tokio_stream::{Stream, StreamExt};
 
 fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("2019-9")
@@ -20,27 +18,19 @@ fn main() -> Result<(), anyhow::Error> {
 
     let mut output = vec![];
 
-    futures_executor::block_on(run_program(program.clone(), stream::once(1), |o| {
+    futures_executor::block_on(run_program(program.clone(), tokio_stream::once(1), |o| {
         output.push(o)
     }))?;
 
-    if output.len() != 1 {
-        bail!("Invalid output for BOOST test mode");
-    }
-
-    println!("BOOST keycode: {:?}", output[0]);
+    println!("BOOST keycode: {:?}", output.first().ok_or_else(|| anyhow!("Invalid output for BOOST test mode"))?);
 
     output.clear();
 
-    futures_executor::block_on(run_program(program.clone(), stream::once(2), |o| {
+    futures_executor::block_on(run_program(program.clone(), tokio_stream::once(2), |o| {
         output.push(o)
     }))?;
 
-    if output.len() != 1 {
-        bail!("Invalid output for BOOST sensor mode");
-    }
-
-    println!("Distress coordinates: {:?}", output[0]);
+    println!("Distress coordinates: {:?}", output.first().ok_or_else(|| anyhow!("Invalid output for BOOST sensor mode"))?);
 
     Ok(())
 }

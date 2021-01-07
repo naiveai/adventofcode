@@ -6,10 +6,8 @@ use derive_more::From;
 use digits_iterator::*;
 use itertools::Itertools;
 use std::{collections::HashMap, convert::TryFrom, fmt, fs, iter, sync::Mutex};
-use tokio::{
-    pin,
-    stream::{self, Stream, StreamExt},
-};
+use tokio::pin;
+use tokio_stream::{Stream, StreamExt};
 
 fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("2019-11")
@@ -84,7 +82,7 @@ fn paint_hull(
 
     futures_executor::block_on(run_program(
         robot_program,
-        stream::iter(iter::from_fn(|| {
+        tokio_stream::iter(iter::from_fn(|| {
             let current_location = *(current_location.lock().unwrap());
 
             Some(

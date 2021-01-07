@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use clap::{App, Arg};
 use itertools::Itertools;
-use maplit::hashset;
+use maplit::{hashmap, hashset};
 use std::{
     collections::{HashMap, HashSet},
     fmt, fs,
@@ -25,12 +25,11 @@ fn main() -> Result<(), anyhow::Error> {
         .unwrap();
     let goal = matches.value_of("goal").map(|s| s.to_owned()).unwrap();
 
-    let (_, requirements, _) = find_requirements(
+    let requirements = find_requirements_alt(
         &possible_reactions,
         &hashset! {raw_resource.clone()},
         goal.clone(),
         1,
-        HashMap::new(),
     )
     .ok_or_else(|| anyhow!("Couldn't find a way to obtain the target chemical."))?;
 
@@ -40,6 +39,77 @@ fn main() -> Result<(), anyhow::Error> {
     );
 
     Ok(())
+}
+
+fn find_requirements_alt(
+    possible_reactions: &HashMap<Chemical, Reaction>,
+    bases: &HashSet<Chemical>,
+    goal_chemical: Chemical,
+    goal_amount: usize,
+) -> Option<HashMap<Chemical, usize>> {
+    let mut bucket = hashmap! {
+        goal_chemical => goal_amount
+    };
+
+    while !bucket.iter().all(|(chemical, _)| bases.contains(chemical)) {
+        let mut to_add = HashMap::with_capacity(bucket.len());
+        let mut to_remove = Vec::with_capacity(bucket.len());
+
+        for (chemical, &amount) in &bucket {
+            // Check if we need this chemical to produce anything else in the bucket
+            let mut chemical_needed_later = false;
+
+            for other_chemical in bucket.keys() {
+                if other_chemical == chemical {
+                    continue;
+                }
+
+                if let Some(other_chemical_reaction) = possible_reactions.get(other_chemical) {
+                    if other_chemical_reaction
+                        .inputs
+                        .iter()
+                        .any(|(input, _)| input == chemical)
+                    {
+                        chemical_needed_later = true;
+                        break;
+                    }
+                } else if bases.contains(other_chemical) {
+                    continue;
+                } else {
+                    // There's a chemical here that we have no way of producing.
+                    return None;
+                }
+            }
+
+            if chemical_needed_later {
+                continue;
+            }
+
+            let chemical_reaction = possible_reactions.get(chemical)?;
+
+            for (input_chemical, &input_amount) in chemical_reaction.inputs.iter() {
+                *to_add.entry(input_chemical.clone()).or_insert(0) += input_amount
+                    * (amount as f64 / chemical_reaction.output_amount as f64).ceil() as usize;
+            }
+
+            to_remove.push(chemical.clone());
+        }
+
+        if to_remove.is_empty() {
+            // We're stuck in a loop, there's nothing we can remove from the bucket.
+            return None;
+        }
+
+        for (chemical, amount) in to_add {
+            *bucket.entry(chemical).or_insert(0) += amount;
+        }
+
+        for chemical in to_remove {
+            bucket.remove(&chemical);
+        }
+    }
+
+    Some(bucket)
 }
 
 // TODO: This does not work accurately because the bucket is created

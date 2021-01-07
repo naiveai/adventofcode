@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 clap = "2"
 anyhow = "1.0.32"
-itertools = "0.9"
+itertools = "0.10"
 indexmap = "1.6"
 derive_more = "0.99"
 digits_iterator = "0.1"
@@ -22,3 +22,4 @@ crossterm = "0.18"
 ctrlc = { version = "3.1", features = ["termination"] }
 atomic = "0.5"
 parking_lot = "0.11"
+maplit = "1.0"

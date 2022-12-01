@@ -15,5 +15,5 @@ main = do
     putStrLn $ "Part 2: " ++ show (sum $ take 3 sortedLoadSums)
 
 parseInput :: T.Text -> Maybe [[Int]]
-parseInput input = sequence $ map (sequence . map (readMaybe . T.unpack)) $ 
+parseInput input = mapM (mapM (readMaybe . T.unpack)) $
     splitOn ([T.empty]) $ map T.strip $ T.lines input

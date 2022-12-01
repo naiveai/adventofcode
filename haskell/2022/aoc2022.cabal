@@ -1,0 +1,44 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.35.0.
+--
+-- see: https://github.com/sol/hpack
+
+name:           aoc2022
+version:        0.1.0.0
+homepage:       https://github.com/naiveai/adventofcode#readme
+bug-reports:    https://github.com/naiveai/adventofcode/issues
+author:         Eshan Singh
+maintainer:     Eshan Singh
+license:        CC0
+build-type:     Simple
+
+source-repository head
+  type: git
+  location: https://github.com/naiveai/adventofcode
+
+library
+  exposed-modules:
+      Lib
+  other-modules:
+      Paths_aoc2022
+  hs-source-dirs:
+      src
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      base >=4.7 && <5
+  default-language: Haskell2010
+
+executable 1
+  main-is: 1.hs
+  other-modules:
+      Paths_aoc2022
+  hs-source-dirs:
+      app
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      aoc2022
+    , base >=4.7 && <5
+    , split
+    , text
+  default-language: Haskell2010

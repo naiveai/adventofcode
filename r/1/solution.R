@@ -1,4 +1,3 @@
-library(plyr)
 library(tidyverse)
 
 basic_calibration_number <- function(x) {
@@ -12,9 +11,10 @@ basic_calibration_number <- function(x) {
 }
 
 calibration_number <- function(x) {
-    digits <- select(
-        as.data.frame(str_match_all(x, "(?=(one)|(two)|(three)|(four)|(five)|(six)|(seven)|(eight)|(nine)|([0-9]))")), !X1
-    ) %>% transmute(tracc = Reduce(coalesce, across(everything(), ~ replace(., . == "-1", NA_integer_))))
+    digits <- lapply(
+        str_match_all(x, "(?=(one|two|three|four|five|six|seven|eight|nine|[0-9]))"),
+        \(x) x[, 2]
+    )
     digits <- str_flatten(unlist(digits))
     spelled_digits_replaced <- str_replace_all(digits, c(
         "one" = "1",

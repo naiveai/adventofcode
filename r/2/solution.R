@@ -3,7 +3,6 @@ library(tidyverse)
 games <- readLines("input.txt") |> str_split(";") |>
     map(function(game_str) {
         str_remove(game_str, "Game \\d: ") |>
-            str_split(",") |>
             str_match_all("(\\d+) (\\w+)") |>
             lapply(function(x) {
                 colors <- setNames(as.numeric(x[, 2]), x[, 3])

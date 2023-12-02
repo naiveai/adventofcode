@@ -11,7 +11,7 @@ basic_calibration_number <- function(x) {
 
 calibration_number <- function(x) {
     str_match_all(x, "(?=(one|two|three|four|five|six|seven|eight|nine|[0-9]))") |>
-        lapply(\(x) x[, 2]) |> unlist() |> str_flatten() |>
+        lapply(\(x) x[, 2]) |>
         str_replace_all(c(
             "one" = "1",
             "two" = "2",

@@ -5,18 +5,6 @@ cards <- read_table("input.txt", col_names = FALSE)
 cards <- cards[-c(1, 2, 13)]
 # cards <- cards[-c(1, 2, 8)]
 
-points <- function(number) {
-    if (number == 0) {
-        return(0)
-    }
-
-    if (number == 1) {
-        return(1)
-    }
-
-    return(2 * points(number - 1))
-}
-
 winning_range <- 1:10
 card_range <- 11:35
 # winning_range <- 1:5
@@ -24,7 +12,7 @@ card_range <- 11:35
 
 win_nums <- apply(cards, 1, \(x) length(intersect(x[winning_range], x[card_range])))
 
-win_points <- sapply(win_nums, points)
+win_points <- sapply(win_nums, \(w) if (w == 0) { 0 } else { 2 ^ (w - 1) })
 sum(win_points)
 
 card_nums <- rep(1, nrow(cards))

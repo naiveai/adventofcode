@@ -15,4 +15,4 @@ clap = "2"
 z3 = "0.7"
 num = "0.3"
 derive_more = "0.99"
-parking_lot = { version = "0.11", features = ["nightly"] }
+parking_lot = { version = "0.12", features = ["nightly"] }

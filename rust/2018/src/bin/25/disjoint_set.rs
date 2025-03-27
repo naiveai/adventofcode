@@ -35,27 +35,13 @@ pub struct DisjointSet<T> {
     nodes: Vec<RwLock<Node>>,
 }
 
-#[derive(Copy)]
+#[derive(Clone, Copy)]
 struct Node {
     rank: usize,
     parent_idx: usize,
     // We use this to be able to iterate on each of our subsets.
     // This creates a circular linked list of nodes.
     next: usize,
-}
-
-// The derived Clone impl doesn't override clone_from,
-// so we'll do that here.
-impl Clone for Node {
-    fn clone(&self) -> Self {
-        *self
-    }
-
-    fn clone_from(&mut self, source: &Self) {
-        self.rank = source.rank;
-        self.parent_idx = source.parent_idx;
-        self.next = source.next;
-    }
 }
 
 impl<T> DisjointSet<T> {
@@ -273,27 +259,18 @@ impl<T> DisjointSet<T> {
             self.find_root_idx(elem_y_idx)?,
         );
 
-        // We don't have to do anything if this is the case. If we
-        // didn't check this, we'd cause UB below by attempting
-        // two mutable borrows of the same element.
-        if x_root_idx == y_root_idx {
-            return Some(false);
-        }
-
-        let x_root: *mut _ = &mut self.nodes[x_root_idx];
-        let y_root: *mut _ = &mut self.nodes[y_root_idx];
-
-        // We could just use RwLock::write here and avoid the need
-        // for unsafe, but since we're in a &mut self context,
-        // we can just ignore RwLock's overhead.
-        let (mut x_root, mut y_root) =
-            unsafe { ((&mut *x_root).get_mut(), (&mut *y_root).get_mut()) };
+        let [x_root, y_root] = match self.nodes.get_disjoint_mut([x_root_idx, y_root_idx]) {
+            Ok(r) => r,
+            // An error here means that both indexes were the same so the elements
+            // were already in the same subset, so we don't need to do anything.
+            Err(_) => return Some(false),
+        };
+        let (x_root, y_root) = (x_root.get_mut(), y_root.get_mut());
 
         if x_root.rank < y_root.rank {
-            // Must use mem::swap here. If we shadowed,
-            // it'd go out of scope when the if block ended.
+            // Now we swap to ensure that x_root is always the one with the higher rank.
             mem::swap(&mut x_root_idx, &mut y_root_idx);
-            mem::swap(&mut x_root, &mut y_root);
+            mem::swap(x_root, y_root);
         }
 
         // Now x_root.rank >= y_root.rank no matter what.
@@ -321,7 +298,7 @@ impl<T> DisjointSet<T> {
     /// operation was performed, Some(false) if it didn't need to be,
     /// or None if the element doesn't exist.
     pub fn make_singleton(&mut self, elem_idx: usize) -> Option<bool> {
-        if self.is_singleton(elem_idx).contains(&true) {
+        if self.is_singleton(elem_idx)? {
             return Some(false);
         }
 
@@ -330,11 +307,11 @@ impl<T> DisjointSet<T> {
         let (&next_idx, &prev_idx) = set_idxs.get(1).zip(set_idxs.last()).unwrap();
 
         if prev_idx != elem_idx {
-            let mut prev = self.nodes[prev_idx].get_mut();
+            let prev = self.nodes[prev_idx].get_mut();
             prev.next = next_idx;
         }
 
-        let mut node = self.nodes[elem_idx].get_mut();
+        let node = self.nodes[elem_idx].get_mut();
 
         self.roots.insert(elem_idx);
         node.parent_idx = elem_idx;
@@ -427,9 +404,7 @@ impl<T: Eq + Clone> Clone for DisjointSet<T> {
         self.elems.clone_from(&source.elems);
 
         self.nodes.resize_with(source.num_elements(), || {
-            // Temporary sentinel value. Node::clone_from should prevent
-            // this from being an unncessary allocation since it'll be
-            // only be mutated, not completely overwritten.
+            // Temporary sentinel value.
             RwLock::new(Node {
                 rank: 0,
                 parent_idx: 0,
@@ -437,13 +412,8 @@ impl<T: Eq + Clone> Clone for DisjointSet<T> {
             })
         });
 
-        for (source_node, dest_node) in source
-            .nodes
-            .iter()
-            .map(|node_rwlock| node_rwlock.read())
-            .zip(self.nodes.iter_mut())
-        {
-            dest_node.get_mut().clone_from(&source_node);
+        for (source_node, dest_node) in source.nodes.iter().zip(self.nodes.iter_mut()) {
+            dest_node.get_mut().clone_from(&source_node.read());
         }
     }
 }
